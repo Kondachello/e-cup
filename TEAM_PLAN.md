@@ -19,8 +19,12 @@ python3.10 -m venv .venv && .venv/bin/pip install -r solution_lbmix2/requirement
 - Никаких внешних данных в признаки.
 - Результат = `work/preds/ИМЯ_val.parquet` + `ИМЯ_test.parquet` (250 000 строк,
   user_id + pred). Функция `exp_lib.save_preds` делает это сама.
-- Проверка: `.venv/bin/python work/scripts/err_corr.py ИМЯ`. Годится: val ≤ 1.70
-  И корреляция ошибок ≤ 0.99. Дальше кидаешь файлы координатору.
+- Проверка: СНАЧАЛА откалибруй свою модель
+  (`.venv/bin/python work/scripts/calibrate.py --pred ИМЯ --bins 24` — создаст ИМЯ_cal),
+  ПОТОМ `.venv/bin/python work/scripts/err_corr.py ИМЯ_cal`. Порядок обязателен:
+  у некалиброванных моделей общее смещение уровня (~0.25 в log) ломает критерий —
+  его проваливают вообще все сырые модели, включая нашего чемпиона.
+  Годится: val ≤ 1.70 И β < 1 после калибровки. Дальше кидаешь файлы координатору.
 - Готовые предсказания всех наших моделей для локальных опытов:
   `work/preds_pack/val_preds.parquet` (с колонкой target) и `test_preds.parquet`.
 - Не трать сабмиты сам — бюджет 5/день общий, распределяет №1.
