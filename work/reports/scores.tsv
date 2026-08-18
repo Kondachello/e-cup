@@ -93,3 +93,9 @@ whale_smoke	1.671013	whale gate over my26 (base=1.671085); honest 2-fold; folds=
 mlpbin	1.676423	binned-mlp k31 ls0.0 512,256 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 3, 7]
 mlpbin_cal	1.668802	binned log-shift calibration of mlpbin; holdout 1.676680->1.669300
 my27	1.668510	assemble_final blend {'mlpbin_cal': 0.8950248969925666, 'mlp2_big_cal': 0.018860334975034306, 'c_xtw_s42': 0.030735718406486055, 'seq2tr_f': 0.055379049625912925}
+mlpziln	1.677806	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 4, 7]
+mlpziln_cal	1.668739	binned log-shift calibration of mlpziln; holdout 1.678165->1.669193
+twl_seqoof	1.693647	twl champion cfg + seqoof feat, n8
+fusion	1.689272	fusion conv7-tr2 + tab196 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 seeds=42 best_steps=[5904] per_seed=[1.68927]
+whale_final	1.670985	whale gate over my26 (base=1.671085); honest 2-fold; folds=[(3.0, 0.99), (4.0, 0.99)] full=(a=3.0,q=0.99); gated=0.010 mean_g=0.404; auc=0.8927; topq=0.95 specq=0.8 gmax=0.6 anchors=14 gap30
+fusion_f	1.685104	fusion conv7-tr2 + tab203 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=42 best_steps=[2000] per_seed=[1.6851]

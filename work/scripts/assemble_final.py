@@ -24,8 +24,8 @@ from common import PREDS_DIR, ROOT, VAL_ANCHOR, load_anchor, rmsle
 from exp_lib import save_preds, log_score
 
 # модели чистого протокола (gap-30), у которых есть val И test предсказания
-CLEAN = ["mlp2_big_cal", "mlp2_final_cal", "c_xtw_s42", "c_ts2_s42", "c_twlog_s42",
-         "twdeep", "seq2tr_f", "c_dirlgb_s42", "mlpbin", "mlpziln", "fusion",
+CLEAN = ["mlpbin_cal", "mlpziln_cal", "mlp2_big_cal", "mlp2_final_cal", "c_xtw_s42", "c_ts2_s42", "c_twlog_s42",
+         "twdeep", "seq2tr_f", "gru_final", "c_dirlgb_s42", "mlpbin", "mlpziln", "fusion",
          "dart_tw", "twl_seqoof", "whale_final", "twl_repair_ab", "febspec"]
 
 VAL_TO_LB = -0.0022          # замерено: c_cand val 1.6717 -> LB 1.66954
