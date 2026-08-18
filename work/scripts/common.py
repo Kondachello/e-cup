@@ -53,12 +53,14 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     extra = FEATURES_DIR / f"anchor={anchor.isoformat()}.extra.parquet"
     v3 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v3.parquet"
     v4 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v4.parquet"
+    v6 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v6.parquet"
     seqoof = FEATURES_DIR / f"anchor={anchor.isoformat()}.seqoof.parquet"
     use2 = extra.exists() and os.environ.get("USE_V2")
     use3 = v3.exists() and os.environ.get("USE_V3")
     use4 = v4.exists() and os.environ.get("USE_V4")
+    use6 = v6.exists() and os.environ.get("USE_V6")
     useoof = os.environ.get("USE_SEQOOF")
-    if not (use2 or use3 or use4 or useoof):
+    if not (use2 or use3 or use4 or use6 or useoof):
         return pl.read_parquet(p, columns=columns)
     df = pl.read_parquet(p)
     if use2:
@@ -67,6 +69,8 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
         df = df.join(pl.read_parquet(v3), on="user_id", how="left")
     if use4:
         df = df.join(pl.read_parquet(v4), on="user_id", how="left")
+    if use6:
+        df = df.join(pl.read_parquet(v6), on="user_id", how="left")
     if useoof:
         if seqoof.exists():
             df = df.join(pl.read_parquet(seqoof), on="user_id", how="left")
