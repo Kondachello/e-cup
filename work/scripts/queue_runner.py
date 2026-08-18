@@ -85,11 +85,13 @@ def main():
         env.update({k: str(v) for k, v in spec.get("env", {}).items()})
         log(f"START {name}")
         t0 = time.time()
-        r = subprocess.run(["/bin/zsh", "-c", spec["cmd"]], env=env,
-                           cwd="/Users/alexanderkondakov/ozon-cup",
-                           capture_output=True, text=True)
+        job_log = WORK / "reports" / f"job_{name}.log"
+        with open(job_log, "w") as lf:
+            r = subprocess.run(["/bin/zsh", "-c", spec["cmd"]], env=env,
+                               cwd="/Users/alexanderkondakov/ozon-cup",
+                               stdout=lf, stderr=subprocess.STDOUT, text=True)
         dt = time.time() - t0
-        tail = (r.stdout + r.stderr)[-600:]
+        tail = open(job_log).read()[-600:]
         log(f"END {name} exit={r.returncode} {dt:.0f}s | tail: {tail.splitlines()[-1] if tail.splitlines() else ''}")
         spec["exit"] = r.returncode
         spec["seconds"] = round(dt)
