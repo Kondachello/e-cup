@@ -1,0 +1,24 @@
+{
+ "results": {
+  "bagged_pool4": {
+   "score": 1.6958641138716026,
+   "iters": [
+    60,
+    60
+   ],
+   "solo": [
+    1.6977409500665424,
+    1.6958451727544142
+   ],
+   "solo_mean": 1.6967930614104783
+  }
+ },
+ "n_bags": 2,
+ "params": {
+  "objective": "tweedie",
+  "tweedie_variance_power": 1.45,
+  "n_estimators": 60
+ },
+ "gap_days": 30,
+ "sample_seed": 777
+}

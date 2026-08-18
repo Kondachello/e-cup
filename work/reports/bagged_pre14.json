@@ -1,0 +1,30 @@
+{
+ "results": {
+  "bagged_pool14": {
+   "score": 1.6906674464772016,
+   "iters": [
+    68,
+    74,
+    71
+   ],
+   "solo": [
+    1.694477544316565,
+    1.6896779946313278,
+    1.693454671560692
+   ],
+   "solo_mean": 1.692536736836195,
+   "holdout_raw": 1.691266410353949,
+   "holdout_cal": 1.6722592744709384,
+   "bag0_holdout_raw": 1.6952008007127854,
+   "bag0_holdout_cal": 1.674251180331271
+  }
+ },
+ "n_bags": 3,
+ "params": {
+  "objective": "tweedie",
+  "tweedie_variance_power": 1.45,
+  "n_estimators": 1500
+ },
+ "gap_days": 30,
+ "sample_seed": 777
+}
