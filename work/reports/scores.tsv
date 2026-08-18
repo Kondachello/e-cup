@@ -97,4 +97,7 @@ mlpziln	1.677806	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=42,
 mlpziln_cal	1.668739	binned log-shift calibration of mlpziln; holdout 1.678165->1.669193
 twl_seqoof	1.693647	twl champion cfg + seqoof feat, n8
 fusion	1.689272	fusion conv7-tr2 + tab196 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 seeds=42 best_steps=[5904] per_seed=[1.68927]
-whale_final	1.670985	whale gate over my26 (base=1.671085); honest 2-fold; folds=[(3.0, 0.99), (4.0, 0.99)] full=(a=3.0,q=0.99); gated=0.010 mean_g=0.404; auc=0.8927;
+whale_final	1.670985	whale gate over my26 (base=1.671085); honest 2-fold; folds=[(3.0, 0.99), (4.0, 0.99)] full=(a=3.0,q=0.99); gated=0.010 mean_g=0.404; auc=0.8927; champion tweedie-on-log on 85 money-free count-free behaviour feats, 118 cols dropped by rule
+fusion_s7	1.703699	fusion conv7-tr2 + tab203 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=7 best_steps=[2952] per_seed=[1.7037]
+twl_v6	1.693378	twl champion cfg + v6 renewal/hazard tier
+mlpbin_v6	1.677845	mlpbin + v6 renewal/hazard tier
