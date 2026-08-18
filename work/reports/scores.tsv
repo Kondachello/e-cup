@@ -114,3 +114,8 @@ countaov_smoke2	1.695756	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl
 countaov_smoke2_dampfit	1.678661	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.696096->1.679070
 countaov_smokepath	1.697184	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n2 damp=1.0; cnt_rmsle=0.6162 aov_rmse=1.1609 aov_bias=-0.5345 it=60/69; best_damp=0.85 (holdout 1.6980->1.6798); direct_champ=1.6927 d=+0.0045
 countaov_smokepath_dampfit	1.678844	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.698004->1.679751
+channel3	1.687376	2ch sum-expm1; tw1.45-on-log S:nl511-mdl150 C:nl127-mdl100 gap30 n14; search=1.6796 cat=0.8669 it=185/376; direct_champ=1.6927 d=-0.0053
+channel3_chcal	1.671114	per-channel binned log-shift (fit half VAL, bins=24) + Jensen k=1.06; honest holdout 1.687682->1.671575; ch_holdout s=1.6564 c=0.8613
+countaov	1.693565	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n14 damp=1.0; cnt_rmsle=0.6157 aov_rmse=1.1642 aov_bias=-0.5240 it=55/179; best_damp=0.85 (holdout 1.6941->1.6758); direct_champ=1.6927 d=+0.0009
+countaov_dampfit	1.675153	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.694103->1.675779
+countaov_cal	1.669179	binned log-shift calibration of countaov; holdout 1.694103->1.669842
