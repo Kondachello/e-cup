@@ -119,3 +119,12 @@ channel3_chcal	1.671114	per-channel binned log-shift (fit half VAL, bins=24) + J
 countaov	1.693565	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n14 damp=1.0; cnt_rmsle=0.6157 aov_rmse=1.1642 aov_bias=-0.5240 it=55/179; best_damp=0.85 (holdout 1.6941->1.6758); direct_champ=1.6927 d=+0.0009
 countaov_dampfit	1.675153	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.694103->1.675779
 countaov_cal	1.669179	binned log-shift calibration of countaov; holdout 1.694103->1.669842
+hmmsim	1.823787	generative HMM sim K=4 S=500 win=120 no-target-training zero_sim=0.452
+hjit37_smoke	1.714438	hjit h37 val@2026-01-07 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n2; it=276; direct_champ=1.6927 d=+0.0217; direct_h30@same_anchor=1.708567 horizon_cost=+0.0059; err_corr_vs_twl_repair_ab=0.8492
+hjit44_smoke	1.736203	hjit h44 val@2025-12-31 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n2; it=80; direct_champ=1.6927 d=+0.0435; direct_h30@same_anchor=1.724492 horizon_cost=+0.0117; err_corr_vs_twl_repair_ab=0.7420
+hjit37_smokepath	1.716916	hjit h37 val@2026-01-07 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n2; it=60; direct_champ=1.6927 d=+0.0242; err_corr_vs_twl_repair_ab=0.8454
+hjit44_smokepath	1.737691	hjit h44 val@2025-12-31 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n2; it=60; direct_champ=1.6927 d=+0.0450; err_corr_vs_twl_repair_ab=0.7386
+hjit37	1.712699	hjit h37 val@2026-01-07 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n14; it=441; direct_champ=1.6927 d=+0.0200; direct_h30@same_anchor=1.698800 horizon_cost=+0.0139; err_corr_vs_twl_repair_ab=0.8513
+hjit44	1.735944	hjit h44 val@2025-12-31 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n14; it=67; direct_champ=1.6927 d=+0.0432; direct_h30@same_anchor=1.714514 horizon_cost=+0.0214; err_corr_vs_twl_repair_ab=0.7400
+twl_v7	1.694155	twl champion cfg + v7 HMM-sim MC tier (hmm_elog/p_zero/sim_std), 8 anchors by v7 coverage
+twl_v7ctl	1.694804	CONTROL for twl_v7: identical cfg/anchors, v2/v3/v4 WITHOUT v7 tier
