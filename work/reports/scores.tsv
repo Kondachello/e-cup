@@ -132,3 +132,20 @@ twl_v7_s1337	1.693129	lgb/log_mse
 twl_v7ctl_s1337	1.692989	lgb/log_mse
 quantint_smoke	1.697502	quantile-integration K=8 (smoke8) trap/lin mono=sort; lgb quantile nl255 mdl300 lr0.05 gap30 n2; cross=0.0210; direct_champ=1.6927 d=+0.0048; same_slice_direct=1.697238 d=+0.0003 err_corr_direct=0.9977
 blend_clean	1.667481	NNLS clean-only OOF, {'mlpziln_cal': 0.349, 'mlpbin_cal': 0.116, 'channel3_chcal': 0.011, 'channel2_cal': 0.077, 'countaov_cal': 0.277, 'seq2tr_f': 0.035, 'fusion_f': 0.058, 'hmmsim': 0.024, 'behavonly': 0.041}
+quantint_pathchk	1.805423	quantile-integration K=3 (0.3,0.6,0.9) trap/lin mono=sort; lgb quantile nl31 mdl300 lr0.05 gap30 n1; cross=0.0000; direct_champ=1.6927 d=+0.1127
+quantint_pathchk_cal	1.682071	binned log-shift calibration of quantint_pathchk (bins=24); honest holdout 1.806386->1.683147
+twl_v7_cal	1.669648	binned log-shift calibration of twl_v7; holdout 1.694723->1.670434
+c_ts2_s42_cal	1.668343	binned log-shift calibration of c_ts2_s42; holdout 1.693628->1.668966
+fusion_f_cal	1.668794	binned log-shift calibration of fusion_f; holdout 1.685224->1.669033
+seq2tr_f_cal	1.681392	binned log-shift calibration of seq2tr_f; holdout 1.710216->1.681577
+hmmsim_cal	1.760232	binned log-shift calibration of hmmsim; holdout 1.820725->1.758109
+behavonly_cal	1.686534	binned log-shift calibration of behavonly; holdout 1.712170->1.686294
+short14_cal	1.819178	binned log-shift calibration of short14; holdout 1.826546->1.817449
+rankmodel_cal	1.685150	binned log-shift calibration of rankmodel; holdout 1.770269->1.685607
+twdeep_cal	1.670018	binned log-shift calibration of twdeep; holdout 1.692888->1.670449
+c_twlog_s42_cal	1.671716	binned log-shift calibration of c_twlog_s42; holdout 1.694669->1.672297
+c_dirlgb_s42_cal	1.670088	binned log-shift calibration of c_dirlgb_s42; holdout 1.695215->1.670551
+twl_seqoof_cal	1.670143	binned log-shift calibration of twl_seqoof; holdout 1.693877->1.670558
+febspec_cal	1.810822	binned log-shift calibration of febspec; holdout 1.823508->1.808295
+whale_final_cal	1.670399	binned log-shift calibration of whale_final; holdout 1.671708->1.671239
+blend_cal	1.666791	NNLS calibrated-clean OOF: {'mlpziln_cal': 0.122, 'channel2_cal': 0.012, 'countaov_cal': 0.074, 'c_ts2_s42_cal': 0.246, 'twl_v7_cal': 0.055, 'seq2tr_f_cal': 0.07, 'fusion_f_cal': 0.316, 'hmmsim_cal': 0.028, 'behavonly_cal': 0.08}
