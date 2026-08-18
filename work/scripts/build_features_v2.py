@@ -48,7 +48,15 @@ def extra_exprs(anchor: date) -> list[pl.Expr]:
 
 
 def main():
-    anchors = [TEST_ANCHOR, VAL_ANCHOR] + train_anchors(14)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--anchors", type=str, default=None,
+                    help="comma-separated ISO dates (default: TEST+VAL+train_anchors(14))")
+    args = ap.parse_args()
+    if args.anchors:
+        anchors = [date.fromisoformat(s) for s in args.anchors.split(",")]
+    else:
+        anchors = [TEST_ANCHOR, VAL_ANCHOR] + train_anchors(14)
     universe = user_universe()
     lf = pl.scan_parquet(TRAIN_PARQUET)
     for a in anchors:
