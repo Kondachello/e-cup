@@ -128,3 +128,7 @@ hjit37	1.712699	hjit h37 val@2026-01-07 (window!=standard VAL); tw1.45-on-log ch
 hjit44	1.735944	hjit h44 val@2025-12-31 (window!=standard VAL); tw1.45-on-log champion cfg gap30 n14; it=67; direct_champ=1.6927 d=+0.0432; direct_h30@same_anchor=1.714514 horizon_cost=+0.0214; err_corr_vs_twl_repair_ab=0.7400
 twl_v7	1.694155	twl champion cfg + v7 HMM-sim MC tier (hmm_elog/p_zero/sim_std), 8 anchors by v7 coverage
 twl_v7ctl	1.694804	CONTROL for twl_v7: identical cfg/anchors, v2/v3/v4 WITHOUT v7 tier
+twl_v7_s1337	1.693129	lgb/log_mse
+twl_v7ctl_s1337	1.692989	lgb/log_mse
+quantint_smoke	1.697502	quantile-integration K=8 (smoke8) trap/lin mono=sort; lgb quantile nl255 mdl300 lr0.05 gap30 n2; cross=0.0210; direct_champ=1.6927 d=+0.0048; same_slice_direct=1.697238 d=+0.0003 err_corr_direct=0.9977
+blend_clean	1.667481	NNLS clean-only OOF, {'mlpziln_cal': 0.349, 'mlpbin_cal': 0.116, 'channel3_chcal': 0.011, 'channel2_cal': 0.077, 'countaov_cal': 0.277, 'seq2tr_f': 0.035, 'fusion_f': 0.058, 'hmmsim': 0.024, 'behavonly': 0.041}
