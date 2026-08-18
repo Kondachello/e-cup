@@ -132,8 +132,6 @@ twl_v7_s1337	1.693129	lgb/log_mse
 twl_v7ctl_s1337	1.692989	lgb/log_mse
 quantint_smoke	1.697502	quantile-integration K=8 (smoke8) trap/lin mono=sort; lgb quantile nl255 mdl300 lr0.05 gap30 n2; cross=0.0210; direct_champ=1.6927 d=+0.0048; same_slice_direct=1.697238 d=+0.0003 err_corr_direct=0.9977
 blend_clean	1.667481	NNLS clean-only OOF, {'mlpziln_cal': 0.349, 'mlpbin_cal': 0.116, 'channel3_chcal': 0.011, 'channel2_cal': 0.077, 'countaov_cal': 0.277, 'seq2tr_f': 0.035, 'fusion_f': 0.058, 'hmmsim': 0.024, 'behavonly': 0.041}
-quantint_pathchk	1.805423	quantile-integration K=3 (0.3,0.6,0.9) trap/lin mono=sort; lgb quantile nl31 mdl300 lr0.05 gap30 n1; cross=0.0000; direct_champ=1.6927 d=+0.1127
-quantint_pathchk_cal	1.682071	binned log-shift calibration of quantint_pathchk (bins=24); honest holdout 1.806386->1.683147
 twl_v7_cal	1.669648	binned log-shift calibration of twl_v7; holdout 1.694723->1.670434
 c_ts2_s42_cal	1.668343	binned log-shift calibration of c_ts2_s42; holdout 1.693628->1.668966
 fusion_f_cal	1.668794	binned log-shift calibration of fusion_f; holdout 1.685224->1.669033

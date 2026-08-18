@@ -25,6 +25,15 @@ HORIZON = 30
 TEST_ANCHOR = date(2026, 2, 13)   # predict 2026-02-14 .. 2026-03-15
 VAL_ANCHOR = date(2026, 1, 14)    # target 2026-01-15 .. 2026-02-13 (observed)
 
+# v8 tier column list (kept here so load_anchor can null-fill uncovered anchors
+# without importing build_features_v8 -> circular import)
+V8_FEATS = [
+    "gf_ord_share", "gf_gmv_share", "gf_ord_share_eb", "gf_lift", "gf_gmv_lift",
+    "gf_only_flag", "gf_n_events", "gf_n_events_frac", "gf_days_since_ev", "gf_last_ev_hit",
+    "wk_r7", "wk_r14", "wk_act_r7", "wk_act_r14", "wk_gap_ratio", "wk_gap_vs_max",
+    "wk_ent90", "wk_ent90_sh", "wk_cv_iei",
+]
+
 
 def train_anchors(n: int = 14, stride: int = 14) -> list[date]:
     """Training anchors strictly before VAL_ANCHOR, newest first in time order."""
@@ -58,14 +67,16 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     v4 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v4.parquet"
     v6 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v6.parquet"
     v7 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v7.parquet"
+    v8 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v8.parquet"
     seqoof = FEATURES_DIR / f"anchor={anchor.isoformat()}.seqoof.parquet"
     use2 = extra.exists() and os.environ.get("USE_V2")
     use3 = v3.exists() and os.environ.get("USE_V3")
     use4 = v4.exists() and os.environ.get("USE_V4")
     use6 = v6.exists() and os.environ.get("USE_V6")
     use7 = os.environ.get("USE_V7")
+    use8 = os.environ.get("USE_V8")
     useoof = os.environ.get("USE_SEQOOF")
-    if not (use2 or use3 or use4 or use6 or use7 or useoof):
+    if not (use2 or use3 or use4 or use6 or use7 or use8 or useoof):
         return pl.read_parquet(p, columns=columns)
     df = pl.read_parquet(p)
     if use2:
@@ -83,6 +94,13 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
             # v7 = HMM-sim MC tier; anchors without coverage get nulls (schema stays consistent)
             df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
                                   for c in ("hmm_elog", "hmm_p_zero", "hmm_sim_std")])
+    if use8:
+        # v8 = gifter/awakening tier (holiday calendar mined from global daily GMV)
+        if v8.exists():
+            df = df.join(pl.read_parquet(v8), on="user_id", how="left")
+        else:
+            df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
+                                  for c in V8_FEATS])
     if useoof:
         if seqoof.exists():
             df = df.join(pl.read_parquet(seqoof), on="user_id", how="left")
