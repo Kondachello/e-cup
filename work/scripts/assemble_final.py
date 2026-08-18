@@ -121,11 +121,16 @@ def main():
     D2 = float(np.mean((lp_base - lt_aligned) ** 2))
     cov = (fb2 + fm2 - D2) / 2
     den = fb2 + fm2 - 2 * cov
-    wm = float(np.clip((fb2 - cov) / den, 0.0, 0.6)) if den > 1e-9 else 0.0
-    f_mix = np.sqrt(max(fb2 - (fb2 - cov) ** 2 / den, 0.0)) if den > 1e-9 else args.base_score
+    w_opt = (fb2 - cov) / den if den > 1e-9 else 0.0
+    wm = float(np.clip(w_opt, 0.0, 0.6))
+    # прогноз считаем при ФАКТИЧЕСКОМ (обрезанном) весе, иначе цифра вводит в заблуждение
+    f_mix = np.sqrt(max(fb2 * (1 - wm) ** 2 + fm2 * wm ** 2 + 2 * wm * (1 - wm) * cov, 0.0))
     corr = cov / np.sqrt(fb2 * fm2)
     print(f"f(нового, оценка) = {fm:.5f} | D2 = {D2:.4f} | corr = {corr:.4f}")
-    print(f"вес нового в миксе = {wm:.3f} | прогноз скора = {f_mix:.5f}")
+    print(f"оптимальный вес (без ограничений) = {w_opt:+.3f} -> применён {wm:.3f}")
+    print(f"прогноз скора при применённом весе = {f_mix:.5f} (база {args.base_score:.5f})")
+    if wm <= 1e-9:
+        print("новый бленд не добавляет информации к измеренному базису — файл = база")
 
     lp_final = (1 - wm) * lp_base + wm * lt_aligned
     out = ROOT / args.out

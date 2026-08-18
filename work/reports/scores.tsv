@@ -90,3 +90,6 @@ mlp2_big_cal	1.672154	binned log-shift calibration of mlp2_big; holdout 1.682834
 my26	1.671085	fine blend clean {'mlp2_big_cal': 0.532913700365246, 'mlp2_final_cal': 0.31656664071320795, 'c_xtw_s42': 0.10880939199147914, 'twdeep': 0.0, 'c_ts2_s42': 0.041710266930067005, 'seq2tr_f': 0.0}
 twl_repair_ab	1.692719	lgb/log_mse
 whale_smoke	1.671013	whale gate over my26 (base=1.671085); honest 2-fold; folds=[(2.0, 0.99), (3.0, 0.99)] full=(a=3.0,q=0.99); gated=0.010 mean_g=0.317; auc=0.8928; topq=0.95 specq=0.8 gmax=0.6 anchors=1 gap30
+mlpbin	1.676423	binned-mlp k31 ls0.0 512,256 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 3, 7]
+mlpbin_cal	1.668802	binned log-shift calibration of mlpbin; holdout 1.676680->1.669300
+my27	1.668510	assemble_final blend {'mlpbin_cal': 0.8950248969925666, 'mlp2_big_cal': 0.018860334975034306, 'c_xtw_s42': 0.030735718406486055, 'seq2tr_f': 0.055379049625912925}
