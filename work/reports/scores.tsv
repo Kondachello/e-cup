@@ -85,3 +85,6 @@ twd_b5	1.694640	lgb/log_mse
 twdeep	1.692512	bag of 5 deep tweedie (seeds+anchors)
 c_ts2_s1337	1.693996	lgb/two_stage
 mlp2_big	1.682081	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 9, 1]
+caruana_v1	1.623983	bagged Caruana B=20 steps=40 lib=22 top={'xgblog_final': 0.548, 'lgblog_final': 0.388, 'mlp_final': 0.039, 'mlp2_big': 0.015, 'mlp2_final_cal': 0.006, 'gru_final': 0.005}
+mlp2_big_cal	1.672154	binned log-shift calibration of mlp2_big; holdout 1.682834->1.672969
+my26	1.671085	fine blend clean {'mlp2_big_cal': 0.532913700365246, 'mlp2_final_cal': 0.31656664071320795, 'c_xtw_s42': 0.10880939199147914, 'twdeep': 0.0, 'c_ts2_s42': 0.041710266930067005, 'seq2tr_f': 0.0}

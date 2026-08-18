@@ -81,6 +81,16 @@ def build(anchor: date, uni: pl.DataFrame, lf: pl.LazyFrame):
          & (pl.col("gmv_ya_t3") > 0)).cast(pl.Int8).alias("gift_spike_flag"),
     ).drop(["ord_days_365", "gmv_sum_365"])
 
+    from common import DATA_START as _DS
+    for sb, eb, tag in [(364, 355, "ya_t1"), (354, 345, "ya_t2"), (344, 335, "ya_t3")]:
+        cov_start = anchor - timedelta(days=sb)
+        cov = 1.0 if cov_start >= _DS else max(0.0, ((anchor - timedelta(days=eb)) - _DS).days + 1) / (sb - eb + 1)
+        cov = min(cov, 1.0)
+        if cov < 0.999:
+            out = out.with_columns(
+                pl.lit(None, dtype=pl.Float32).alias(f"gmv_{tag}"),
+                pl.lit(None, dtype=pl.Float32).alias(f"ordd_{tag}"),
+            )
     casts = [pl.col(c).cast(pl.Float32) for c, dt in zip(out.columns, out.dtypes) if dt == pl.Float64]
     out.with_columns(casts).write_parquet(out_p)
     print(f"  v3 {anchor}: {out.shape} in {time.time()-t0:.1f}s", flush=True)

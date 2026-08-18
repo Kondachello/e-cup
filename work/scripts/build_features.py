@@ -176,6 +176,17 @@ def build_anchor(lf: pl.LazyFrame, universe: pl.DataFrame, daily: pl.DataFrame, 
     ))]
     out = out.with_columns([pl.col(c).fill_null(0) for c in zero_fill])
 
+    # year-ago windows: null-out when not fully covered by data (avoid fake zeros)
+    for sb, eb, tag in YEARAGO:
+        cov_start = anchor - timedelta(days=sb)
+        cov = 1.0 if cov_start >= DATA_START else max(0.0, (anchor - timedelta(days=eb) - DATA_START).days + 1) / (sb - eb + 1)
+        cov = min(cov, 1.0)
+        out = out.with_columns(pl.lit(cov, dtype=pl.Float32).alias(f"ya_cov_{tag}"))
+        if cov < 0.999:
+            for c in [f"gmv_sum_{tag}", f"ord_days_{tag}", f"active_days_{tag}", f"ord_cnt_{tag}"]:
+                out = out.with_columns(pl.lit(None, dtype=pl.Float32).alias(c))
+            out = out.with_columns(pl.lit(None, dtype=pl.Float32).alias(f"log_gmv_sum_{tag}"))
+
     si = seasonal_index(daily, anchor)
     hist_days = (anchor - DATA_START).days + 1
     out = out.with_columns(
