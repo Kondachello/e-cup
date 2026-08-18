@@ -101,3 +101,8 @@ whale_final	1.670985	whale gate over my26 (base=1.671085); honest 2-fold; folds=
 fusion_s7	1.703699	fusion conv7-tr2 + tab203 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=7 best_steps=[2952] per_seed=[1.7037]
 twl_v6	1.693378	twl champion cfg + v6 renewal/hazard tier
 mlpbin_v6	1.677845	mlpbin + v6 renewal/hazard tier
+channel2_smoke	1.690752	SMOKE 2 anchors 200 trees; 2ch sum-expm1 tw1.45-on-log; search=1.6829 cat=0.8670 it=64/80; direct_champ=1.6927 d=-0.0019
+ch2dir_smoke	1.697238	SMOKE direct baseline for channel2 (same 2 anchors, 200 trees)
+channel2_smokepath	1.690890	SMOKE full-path incl retrain+test, 70 trees; search=1.6829 cat=0.8671 it=64/70; direct_champ=1.6927 d=-0.0018
+channel2	1.687216	2ch sum-expm1; tw1.45-on-log nl255 lr0.05 gap30 n14; search=1.6794 cat=0.8670 it=325/210; direct_champ=1.6927 d=-0.0055
+channel2_cal	1.671125	binned log-shift calibration of channel2; holdout 1.687476->1.671526
