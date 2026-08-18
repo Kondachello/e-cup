@@ -1,0 +1,87 @@
+smoke_lgb	1.663204	lgb/log_mse
+base_best	1.761395	heuristic blend_log (w=[0.195, 0.166, 0.403]), tuned on anchor 2025-12-31
+smoke_ao	1.663589	lgb/log_mse
+xgblog_a	1.640589	xgb/log ml255 mcw300 lr.05 cs.8
+lgblog_a	1.637830	lgblog a: nl255 mdl300 lr.04 ff.75
+cblog_a	1.654295	cb/log_mse d8 l2=3 lr.05 6anch
+xgblog_b	1.625468	xgb/log ml511 mcw100 lr.05 cs.8
+smoke2	1.664741	lgb/log_mse
+xgblog_c	1.626803	xgb/log ml511 mcw100 lr.05 cs.6
+cblog_b	1.653312	cb/log_mse d8 l2=10 lr.08 6anch
+lgblog_b	1.638270	lgblog b: nl511 mdl800 lr.05 ff.75
+lgblog_c	1.642316	lgblog c: nl127 mdl100 lr.05 ff.6
+xgblog_d	1.631396	xgb/log ml511 mcw300 lr.05 cs.8
+lgblog_d	1.630625	lgblog d: A + tau150
+lgblog_e	1.629825	lgblog e: D + lr.05
+lgblog_f	1.629586	lgblog f: E - seasonal_index
+cblog_d	1.653150	cb/log_mse d8 l2=10 lr.08 rsm.8 6anch
+lgblog_final	1.633394	lgblog final: nl255 mdl300 lr.05 ff.75 tau150 -seasonal_index, 14 anchors
+xgblog_final	1.630363	xgb/log FINAL ml511 mcw100 lr.05 cs.8 8anchors(oom-fallback)
+cblog_final	1.656191	cb/log_mse d8 l2=10 lr.08 rsm.8 ALL14 FINAL
+blend_w1a	1.623266	blend of 3: {'lgblog_final': 0.5, 'xgblog_final': 0.5} scale=1.005
+smoke_val2	1.701243	lgb/log_mse
+mlp_smoke	1.673045	mlp 512,256,128 do0.15 lr0.001 bs8192 tau0.0 seeds=42 2anch ep=[3]
+gru_smoke	1.752032	gru h96x2 do0.1 b4096 lr0.002 2anch best_step48
+lgbtw12_e	2.234383	lgb tweedie vp1.2 6anch v2
+mlp_a	1.668093	mlp 512,256,128 do0.15 lr0.001 bs8192 tau0.0 seeds=42 6anch ep=[8]
+smoke_dt	1.666775	lgb/log_mse
+mlp_smoke2	1.687952	mlp 512,256,128 do0.15 lr0.001 bs8192 tau0.0 seeds=42 1anch ep=[2]
+mlp_b	1.667988	mlp 512,256,128 do0.15 lr0.001 bs8192 tau150.0 seeds=42 6anch ep=[10]
+lgbtw14_e	1.866382	lgb tweedie vp1.4 6anch v2
+mlp_final	1.663563	mlp 512,256,128 do0.15 lr0.001 bs8192 tau150.0 seeds=42,1337 8anch ep=[5, 17]
+lgbhub_e	1.675731	lgb huber a1.35 on log1p 6anch v2
+gru_final	1.698778	gru h96x2 do0.1 b4096 lr0.002 8anch best_step1220
+ts2_a	1.540138	2stage lgb defaults nl255 mdl300 lr.04 cap2800 6anch
+lgbtwlog_e	1.553405	lgb tweedie vp1.2 ON log1p target 6anch v2
+ts2_b	1.577744	2stage lgb s1:nl127 mdl500 s2:nl255 mdl100 cap2800 6anch
+blend_w2	1.623266	blend of 4: {'lgblog_final': 0.5, 'xgblog_final': 0.5} scale=1.005
+ts2_val2chk	1.527522	lgb/two_stage
+twlog_probe	1.594454	PROBE tweedie-on-log vp1.2, 14 recent anchors, v2
+direct_val2chk	1.521875	lgb/log_mse
+dirlgb_a6_v2	1.521875	dirlgb nl255 mdl300 lr.05 ff.75 6anch v2f DEC31
+dirlgb_a6	1.504365	dirlgb nl255 mdl300 lr.05 ff.75 6anch v2f JAN
+smoke_gap	1.701856	lgb/log_mse
+twl_vp13_v2	1.717468	CLEAN twlog vp1.3 8a gap30 DEC31
+dlg8_v2	1.719942	CLEAN dirlgb nl255 mdl300 lr.05 ff.75 8anch gap30 v2f DEC31
+c_ts2_a_v2	1.723134	CLEAN ts2 defaults(nl255 mdl300 lr.04) 8anch gap30 v2 DEC31
+dlg8	1.697725	CLEAN dirlgb nl255 mdl300 lr.05 ff.75 8anch gap30 v2f JAN
+twl_vp13	1.695341	CLEAN twlog vp1.3 8a gap30 JAN
+c_ts2_a	1.696807	CLEAN ts2 defaults(nl255 mdl300 lr.04) 8anch gap30 v2 JAN
+twl_vp115_v2	1.718438	CLEAN twlog vp1.15 8a gap30 DEC31
+twl_vp115	1.695901	CLEAN twlog vp1.15 8a gap30 JAN
+dlg12_v2	1.719614	CLEAN dirlgb nl255 mdl300 lr.05 ff.75 12anch gap30 v2f DEC31
+dlg12	1.697462	CLEAN dirlgb nl255 mdl300 lr.05 ff.75 12anch gap30 v2f JAN
+xtw_smoke	1.736176	SMOKE lean trainer
+c_ts2_b_v2	1.723252	CLEAN ts2 B s1:nl127mdl500 s2:nl255mdl100 8anch gap30 v2 DEC31
+xtw_smoke2	1.707237	SMOKE lean trainer test-retrain path
+c_ts2_b	1.696353	CLEAN ts2 B s1:nl127mdl500 s2:nl255mdl100 8anch gap30 v2 JAN
+twl_vp145_v2	1.716822	CLEAN twlog vp1.45 8a gap30 DEC31
+twl_vp145	1.695273	CLEAN twlog vp1.45 8a gap30 JAN
+q_twl_v3	1.694480	lgb/log_mse
+q_twl_v3_v2	1.716407	lgb/log_mse
+q_twl_tau	1.694726	lgb/log_mse
+q_twl_tau_v2	1.717368	lgb/log_mse
+q_dlg_v3	1.696828	lgb/log_mse
+q_dlg_v3_v2	1.719886	lgb/log_mse
+q_xtw	1.698921	xgb/log_mse
+q_xtw_v2	1.723412	xgb/log_mse
+c_twlog_s42	1.694078	lgb/log_mse
+c_twlog_s1337	1.694099	lgb/log_mse
+c_dirlgb_s42	1.694866	lgb/log_mse
+c_dirlgb_s1337	1.695146	lgb/log_mse
+c_xtw_s42	1.697925	xgb/log_mse
+c_ts2_s42	1.693138	lgb/two_stage
+mlp2_final	1.684840	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337 10anch ep=[8, 2]
+c_cand	1.675002	blend of 7: {'mlp2_final': 1.0} scale=0.940
+mlp2_final_cal	1.672649	binned log-shift calibration of mlp2_final; holdout 1.685520->1.673592
+seq2tr	1.694868	seq2 tr b2048 lr0.001 ep8 clean=1 seeds=42,1337 best_steps=[2000, 4000] per_seed=[1.70156, 1.69138]
+seq2tr_f	1.710203	seq2 tr b2048 lr0.001 ep3 clean=1 seeds=42,1337 best_steps=[2952, 2000] per_seed=[1.72236, 1.70062]
+febspec	1.826551	Feb2025->Mar seasonal specialist: 3 anchors 2025-02-06..20, 53 short<=42d feats, tweedie1.3 on log1p nl127 mdl300 lr.05 1500it fixed; off-season val; aux 2026-01-07=1.833662
+twd_b1	1.693286	lgb/log_mse
+twd_b2	1.694639	lgb/log_mse
+twd_b3	1.693543	lgb/log_mse
+twd_b4	1.694021	lgb/log_mse
+twd_b5	1.694640	lgb/log_mse
+twdeep	1.692512	bag of 5 deep tweedie (seeds+anchors)
+c_ts2_s1337	1.693996	lgb/two_stage
+mlp2_big	1.682081	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 9, 1]

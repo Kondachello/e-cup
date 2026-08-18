@@ -1,0 +1,24 @@
+# данные соревнования и производные (тяжёлые, восстанавливаются скриптами)
+train.parquet
+sample_submit.csv
+work/features/
+work/seq/
+work/seq2/
+work/features_sub/
+work/preds/
+work/models/
+work/queue/
+submissions/
+prev_solutions/
+solution_lbmix2/artifacts/
+solution_lbmix2.zip
+research/
+
+# окружение и служебное
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+work/reports/*.log
+work/reports/queue_runner.out
+baseline-seacrh-ltv.ipynb
