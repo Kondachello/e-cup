@@ -1,13 +1,16 @@
 """Shared utilities for the Ozon E-CUP LTV competition."""
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-ROOT = Path("/Users/alexanderkondakov/ozon-cup")
+# Repo root: OZON_ROOT env var, else two levels up from this file (work/scripts/ -> repo).
+# Must contain train.parquet + sample_submit.csv; work/ subtree is created next to them.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
 TRAIN_PARQUET = ROOT / "train.parquet"
 SAMPLE_SUBMIT = ROOT / "sample_submit.csv"
 WORK = ROOT / "work"

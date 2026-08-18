@@ -1,0 +1,43 @@
+# E-CUP 2026 Задача 3 — зафиксированные зависимости (Python 3.10, pip freeze).
+# Установка: python3.10 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Из freeze исключены только инструменты разработки/визуализации, не участвующие
+# в пайплайне (matplotlib/plotly/graphviz/duckdb/py-spy и их транзитивные зависимости).
+
+# --- ядро данных ---
+numpy==2.2.6
+polars==1.43.2
+polars-runtime-32==1.43.2
+pyarrow==25.0.1
+pandas==2.3.3
+python-dateutil==2.9.0.post0
+pytz==2026.3.post1
+tzdata==2026.3
+six==1.17.0
+packaging==26.3
+
+# --- модели: бустинги ---
+lightgbm==4.7.0
+xgboost==3.2.0
+
+# --- модели: нейросети (torch + транзитивные) ---
+torch==2.13.0
+filelock==3.32.3
+fsspec==2026.7.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+mpmath==1.3.0
+networkx==3.4.2
+sympy==1.14.0
+typing_extensions==4.16.0
+
+# --- признаки v4 (BTYD: BG/NBD + Gamma-Gamma) ---
+Lifetimes==0.11.3
+autograd==1.9.1
+dill==0.4.1
+
+# --- вспомогательные (калибровка, метрики) ---
+scipy==1.15.3
+scikit-learn==1.7.2
+joblib==1.5.3
+threadpoolctl==3.6.0
+tqdm==4.70.0
