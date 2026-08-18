@@ -15,6 +15,16 @@ vs the direct champion (1.6927).
 
 Needs anchor=DATE.chtgt.parquet (build_channel_targets.py) for train/gap/VAL anchors.
 
+V2 additions:
+  * per-channel param overrides: --params-search / --params-cat (JSON on top of
+    champion + --params);
+  * per-channel quantile-bin calibration in log space BEFORE summation (shifts
+    fitted on a fixed half of VAL users, calibrate.py-style) + global Jensen
+    multiplier k on the final sum (grid 0.92..1.08 step 0.02, fitted on the same
+    half); honest score = the other half. Applied to val+test, saved as
+    NAME_chcal_{val,test}.parquet next to the raw NAME_{val,test}.parquet.
+    Disable with --no-cal.
+
 Full champion run:
   USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=6 \
     train_channel.py --name channel2 --threads 6
@@ -87,11 +97,66 @@ def combine(pred_log: dict[str, np.ndarray]) -> np.ndarray:
     return sum(np.expm1(np.clip(pred_log[c], 0, None)) for c in CHANNELS)
 
 
+K_GRID = np.round(np.arange(0.92, 1.0801, 0.02), 2)
+
+
+def cal_split(n: int) -> np.ndarray:
+    """Fixed fit-half mask over VAL users (same rng protocol as calibrate.py)."""
+    return np.random.default_rng(0).permutation(n) < n // 2
+
+
+def fit_channel_calibration(pred_val_log: dict[str, np.ndarray],
+                            yv: dict[str, np.ndarray], yv_tot: np.ndarray,
+                            bins: int = 24) -> dict:
+    """Per-channel quantile-bin log-shifts + global Jensen multiplier k.
+
+    Everything is fitted on the fixed fit-half of VAL users only; the returned
+    'holdout' score (other half) is the honest estimate.
+    """
+    from calibrate import apply_shifts, fit_shifts
+    half = cal_split(len(yv_tot))
+    shifts, cal_log = {}, {}
+    for c in CHANNELS:
+        lp = np.clip(pred_val_log[c], 0, None)
+        ctr, sh = fit_shifts(lp[half], np.log1p(yv[c][half]), bins)
+        if len(ctr) == 0:  # degenerate channel: no populated bins -> identity
+            ctr, sh = np.array([0.0]), np.array([0.0])
+        shifts[c] = (ctr, sh)
+        cal_log[c] = apply_shifts(lp, ctr, sh)
+    tot = sum(np.expm1(cal_log[c]) for c in CHANNELS)
+    k_scores = {float(k): rmsle(yv_tot[half], k * tot[half]) for k in K_GRID}
+    k = min(k_scores, key=k_scores.get)
+    return dict(
+        shifts=shifts, k=k, half=half, val_cal=k * tot,
+        ch_holdout={c: rmsle(yv[c][~half], np.expm1(cal_log[c][~half]))
+                    for c in CHANNELS},
+        holdout=rmsle(yv_tot[~half], k * tot[~half]),
+        holdout_nok=rmsle(yv_tot[~half], tot[~half]),
+        full=rmsle(yv_tot, k * tot),
+    )
+
+
+def apply_channel_calibration(pred_log: dict[str, np.ndarray], cal: dict) -> np.ndarray:
+    from calibrate import apply_shifts
+    tot = np.zeros_like(next(iter(pred_log.values())), dtype=np.float64)
+    for c in CHANNELS:
+        ctr, sh = cal["shifts"][c]
+        tot += np.expm1(apply_shifts(np.clip(pred_log[c], 0, None), ctr, sh))
+    return cal["k"] * tot
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="channel2")
     ap.add_argument("--params", type=str, default="{}",
                     help="JSON overrides on top of the champion channel params")
+    ap.add_argument("--params-search", type=str, default="{}",
+                    help="JSON overrides for the search channel only")
+    ap.add_argument("--params-cat", type=str, default="{}",
+                    help="JSON overrides for the cat channel only")
+    ap.add_argument("--no-cal", action="store_true",
+                    help="skip per-channel calibration + Jensen k")
+    ap.add_argument("--cal-bins", type=int, default=24)
     ap.add_argument("--n-anchors", type=int, default=14)
     ap.add_argument("--gap-days", type=int, default=30)
     ap.add_argument("--seed", type=int, default=42)
@@ -101,8 +166,19 @@ def main():
     args = ap.parse_args()
     if args.threads:
         os.environ["OMP_NUM_THREADS"] = str(args.threads)
-    params = dict(CHAMPION_PARAMS)
-    params.update(json.loads(args.params))
+    base_params = dict(CHAMPION_PARAMS)
+    base_params.update(json.loads(args.params))
+    ch_over = {"search": json.loads(args.params_search),
+               "cat": json.loads(args.params_cat)}
+    params_ch = {}
+    for c in CHANNELS:
+        p = dict(base_params)
+        p.update(ch_over[c])
+        params_ch[c] = p
+    for c in CHANNELS:
+        print(f"params[{c}]: nl={params_ch[c]['num_leaves']} "
+              f"mdl={params_ch[c]['min_data_in_leaf']} "
+              f"lr={params_ch[c]['learning_rate']}", flush=True)
 
     t0 = time.time()
     avail = chtgt_anchors()
@@ -138,7 +214,7 @@ def main():
         print(f"--- channel {c}: nz_rate={float((y[c] > 0).mean()):.4f} "
               f"val_nz={float((yv[c] > 0).mean()):.4f}", flush=True)
         m, it = fit_lgb(X, np.log1p(y[c]), None, Xv, np.log1p(yv[c]),
-                        dict(params), "log_mse", args.seed + i)
+                        dict(params_ch[c]), "log_mse", args.seed + i)
         best_it[c] = it
         pred_val_log[c] = m.predict(Xv)
         del m
@@ -147,19 +223,40 @@ def main():
     score = rmsle(yv_tot, pv_tot)
     ch_score = {c: rmsle(yv[c], np.expm1(np.clip(pred_val_log[c], 0, None)))
                 for c in CHANNELS}
+    par_tag = " ".join(
+        f"{c[0].upper()}:nl{params_ch[c]['num_leaves']}-mdl{params_ch[c]['min_data_in_leaf']}"
+        for c in CHANNELS)
     notes = (args.notes or
-             f"2ch sum-expm1; tw1.45-on-log nl255 lr0.05 gap{args.gap_days} "
+             f"2ch sum-expm1; tw1.45-on-log {par_tag} gap{args.gap_days} "
              f"n{len(tr_anchors)}") + (
              f"; search={ch_score['search']:.4f} cat={ch_score['cat']:.4f} "
              f"it={best_it['search']}/{best_it['cat']}; "
              f"direct_champ={DIRECT_CHAMPION} d={score - DIRECT_CHAMPION:+.4f}")
     save_preds(args.name, "val", uid_val, pv_tot)
     log_score(args.name, score, notes)
+
+    cal = None
+    if not args.no_cal:
+        cal = fit_channel_calibration(pred_val_log, yv, yv_tot, args.cal_bins)
+        base_holdout = rmsle(yv_tot[~cal["half"]], pv_tot[~cal["half"]])
+        print(f"[CAL] k={cal['k']:.2f} holdout raw {base_holdout:.6f} -> "
+              f"cal {cal['holdout']:.6f} (no-k {cal['holdout_nok']:.6f}); "
+              f"full-val cal {cal['full']:.6f}", flush=True)
+        save_preds(f"{args.name}_chcal", "val", uid_val, cal["val_cal"])
+        log_score(f"{args.name}_chcal", cal["full"],
+                  f"per-channel binned log-shift (fit half VAL, bins={args.cal_bins}) "
+                  f"+ Jensen k={cal['k']:.2f}; honest holdout "
+                  f"{base_holdout:.6f}->{cal['holdout']:.6f}; "
+                  f"ch_holdout s={cal['ch_holdout']['search']:.4f} "
+                  f"c={cal['ch_holdout']['cat']:.4f}")
     print("RESULT " + json.dumps({
         "name": args.name, "total": round(score, 6),
         "search": round(ch_score["search"], 6), "cat": round(ch_score["cat"], 6),
         "delta_vs_champion": round(score - DIRECT_CHAMPION, 6),
         "best_it": best_it, "n_anchors": len(tr_anchors),
+        "cal": None if cal is None else {
+            "k": cal["k"], "holdout": round(cal["holdout"], 6),
+            "full": round(cal["full"], 6)},
     }), flush=True)
 
     if args.no_test:
@@ -192,7 +289,7 @@ def main():
 
     pred_test_log = {}
     for i, c in enumerate(CHANNELS):
-        p = dict(params)
+        p = dict(params_ch[c])
         p["n_estimators"] = max(50, int(best_it[c] * iter_mult))
         print(f"--- retrain {c}: {p['n_estimators']} iters", flush=True)
         mf, _ = fit_lgb(Xall, np.concatenate(y_parts[c]), None, None, None,
@@ -201,6 +298,9 @@ def main():
         del mf
 
     save_preds(args.name, "test", uid_t, combine(pred_test_log))
+    if cal is not None:
+        save_preds(f"{args.name}_chcal", "test", uid_t,
+                   apply_channel_calibration(pred_test_log, cal))
     print(f"[DONE] {args.name} val_rmsle={score:.6f} total {time.time()-t0:.0f}s",
           flush=True)
 

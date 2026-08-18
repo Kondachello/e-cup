@@ -106,3 +106,11 @@ ch2dir_smoke	1.697238	SMOKE direct baseline for channel2 (same 2 anchors, 200 tr
 channel2_smokepath	1.690890	SMOKE full-path incl retrain+test, 70 trees; search=1.6829 cat=0.8671 it=64/70; direct_champ=1.6927 d=-0.0018
 channel2	1.687216	2ch sum-expm1; tw1.45-on-log nl255 lr0.05 gap30 n14; search=1.6794 cat=0.8670 it=325/210; direct_champ=1.6927 d=-0.0055
 channel2_cal	1.671125	binned log-shift calibration of channel2; holdout 1.687476->1.671526
+countaov_smoke	1.973698	cnt*aov; tw1.3-on-log1p(cnt) + mse-log(aov) nl255 mdl300 lr0.05 gap30 n2 damp=1.0; cnt_rmsle=0.6162 aov_rmse=0.8848 aov_bias=+0.1367 it=60/88; best_damp=0.85 (holdout 1.9748->1.9073); direct_champ=1.6927 d=+0.2810
+countaov_smoke_dampfit	1.906040	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.974823->1.907298
+ch3_sweep_smoke	1.689291	SMOKE sweep 2a 300t: best S=nl511_mdl150 C=nl127_mdl100 it=59/158; cal holdout 1.676319 k=1.06
+horizon4_smoke	1.733234	4wk sum-expm1; tw1.45-on-log nl255 lr0.05 gap30 n2; w1=1.4187 w2=1.4134 w3=1.4061 w4=1.5066 it=54/40/48/103; direct_champ=1.6927 d=+0.0405; smoke_direct=1.697238
+countaov_smoke2	1.695756	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n2 damp=1.0; cnt_rmsle=0.6162 aov_rmse=1.1752 aov_bias=-0.5267 it=60/168; best_damp=0.85 (holdout 1.6961->1.6791); direct_champ=1.6927 d=+0.0031
+countaov_smoke2_dampfit	1.678661	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.696096->1.679070
+countaov_smokepath	1.697184	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n2 damp=1.0; cnt_rmsle=0.6162 aov_rmse=1.1609 aov_bias=-0.5345 it=60/69; best_damp=0.85 (holdout 1.6980->1.6798); direct_champ=1.6927 d=+0.0045
+countaov_smokepath_dampfit	1.678844	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.698004->1.679751
