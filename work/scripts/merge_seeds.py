@@ -22,7 +22,6 @@ GROUPS = {
     "behavonly_avg":["behavonly", "behavonly_s1337", "behavonly_s7"],
     "mlpbin_avg":  ["mlpbin", "mlpbin_b", "mlpbin_c", "mlpbin_d"],
     "fusion_v3_avg":["fusion_v3", "fusion_v3_s1337", "fusion_v3_s7", "fusion_v3_s2024", "fusion_v3_s555"],
-    "fusion_v3ctl_avg":["fusion_v3ctl", "fusion_v3ctl_s1337", "fusion_v3ctl_s7"],
 }
 
 def main():
