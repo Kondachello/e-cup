@@ -20,6 +20,7 @@ GROUPS = {
     "channel_avg": ["channel2", "channel_s1337"],
     "twl_v7_avg":  ["twl_v7", "twl_v7_s1337", "twl_v7_s7"],
     "behavonly_avg":["behavonly", "behavonly_s1337", "behavonly_s7"],
+    "mlpbin_avg":  ["mlpbin", "mlpbin_b", "mlpbin_c", "mlpbin_d"],
 }
 
 def main():
