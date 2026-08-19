@@ -1,0 +1,78 @@
+{
+ "summary": {
+  "n_models": 5,
+  "n_pool": 33,
+  "min_corr_with_nearest": 0.921,
+  "median_corr_with_nearest": 0.9213,
+  "n_below_097": 5,
+  "ref_model": "febspec_cal",
+  "ref_corr": 0.9211,
+  "family": {
+   "k": 5,
+   "avg_rmsle": 1.772356,
+   "err_corr": 0.9393,
+   "rho_max_for_nonzero_w": 0.9404,
+   "w_opt_2way": 0.0087,
+   "gain_2way": 8e-06,
+   "mean_pairwise_err_corr": 0.9896,
+   "blend_rmsle": 1.666718,
+   "mean_pairwise_err_corr_in_family": 0.9896,
+   "min_pairwise_err_corr_in_family": 0.9767,
+   "mean_err_corr_with_blend": 0.9354,
+   "min_err_corr_with_blend": 0.9203,
+   "by_mechanism": {}
+  }
+ },
+ "models": {
+  "febspec2_cal": {
+   "val_rmsle": 1.770665,
+   "corr_nearest_existing": 0.921,
+   "nearest_existing": "short14_cal",
+   "corr_nearest_any": 0.9943,
+   "nearest_any": "febspec3_tw_cal",
+   "is_new": true,
+   "err_corr_blend": 0.9394,
+   "rho_max_for_nonzero_w": 0.9413
+  },
+  "febspec3_avg_cal": {
+   "val_rmsle": 1.771682,
+   "corr_nearest_existing": 0.9225,
+   "nearest_existing": "short14_cal",
+   "corr_nearest_any": 0.9989,
+   "nearest_any": "febspec3_tw_cal",
+   "is_new": true,
+   "err_corr_blend": 0.9396,
+   "rho_max_for_nonzero_w": 0.9408
+  },
+  "febspec3_mlp_cal": {
+   "val_rmsle": 1.774166,
+   "corr_nearest_existing": 0.9215,
+   "nearest_existing": "short14_cal",
+   "corr_nearest_any": 0.9989,
+   "nearest_any": "febspec3_avg_cal",
+   "is_new": true,
+   "err_corr_blend": 0.9384,
+   "rho_max_for_nonzero_w": 0.9394
+  },
+  "febspec3_tw_cal": {
+   "val_rmsle": 1.771914,
+   "corr_nearest_existing": 0.9213,
+   "nearest_existing": "short14_cal",
+   "corr_nearest_any": 0.9989,
+   "nearest_any": "febspec3_avg_cal",
+   "is_new": true,
+   "err_corr_blend": 0.9395,
+   "rho_max_for_nonzero_w": 0.9406
+  },
+  "febspec_cal": {
+   "val_rmsle": 1.810822,
+   "corr_nearest_existing": 0.9211,
+   "nearest_existing": "short14_cal",
+   "corr_nearest_any": 0.9691,
+   "nearest_any": "febspec3_avg_cal",
+   "is_new": true,
+   "err_corr_blend": 0.9203,
+   "rho_max_for_nonzero_w": 0.9204
+  }
+ }
+}
