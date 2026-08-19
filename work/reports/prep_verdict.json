@@ -1,0 +1,224 @@
+{
+ "rows": [
+  {
+   "kind": "prep",
+   "family": "mlp2",
+   "variant": "signlog",
+   "seed": 42,
+   "name": "fp_mlp2_signlog_42",
+   "baseline": "es_mlp2_cal42",
+   "base_cal": 1.670881,
+   "arm_cal": 1.674072,
+   "delta": 0.003191,
+   "delta_split7": 0.003179,
+   "delta_xfit5": 0.003122,
+   "delta_raw": 0.004126,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 5,
+    "epochs_run": 9,
+    "budget_exhausted": false
+   }
+  },
+  {
+   "kind": "prep",
+   "family": "mlp2",
+   "variant": "signlog",
+   "seed": 1337,
+   "name": "fp_mlp2_signlog_1337",
+   "baseline": "es_mlp2_cal1337",
+   "base_cal": 1.670072,
+   "arm_cal": 1.673698,
+   "delta": 0.003626,
+   "delta_split7": 0.00359,
+   "delta_xfit5": 0.003607,
+   "delta_raw": -0.002059,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 7,
+    "epochs_run": 11,
+    "budget_exhausted": false
+   }
+  },
+  {
+   "kind": "prep",
+   "family": "bin",
+   "variant": "signlog",
+   "seed": 42,
+   "name": "fp_bin_signlog_42",
+   "baseline": "es_bin_cal42",
+   "base_cal": 1.669754,
+   "arm_cal": 1.671517,
+   "delta": 0.001763,
+   "delta_split7": 0.001763,
+   "delta_xfit5": 0.001739,
+   "delta_raw": -0.011801,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 2,
+    "epochs_run": 6,
+    "budget_exhausted": false
+   }
+  },
+  {
+   "kind": "prep",
+   "family": "bin",
+   "variant": "signlog",
+   "seed": 1337,
+   "name": "fp_bin_signlog_1337",
+   "baseline": "es_bin_cal1337",
+   "base_cal": 1.669111,
+   "arm_cal": 1.671583,
+   "delta": 0.002472,
+   "delta_split7": 0.002499,
+   "delta_xfit5": 0.002519,
+   "delta_raw": 0.004066,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 4,
+    "epochs_run": 8,
+    "budget_exhausted": false
+   }
+  },
+  {
+   "kind": "prep",
+   "family": "ziln",
+   "variant": "signlog",
+   "seed": 42,
+   "name": "fp_ziln_signlog_42",
+   "baseline": "es_ziln_cal42",
+   "base_cal": 1.66963,
+   "arm_cal": 1.672203,
+   "delta": 0.002573,
+   "delta_split7": 0.002634,
+   "delta_xfit5": 0.00255,
+   "delta_raw": -0.009675,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 7,
+    "epochs_run": 11,
+    "budget_exhausted": false
+   }
+  },
+  {
+   "kind": "prep",
+   "family": "ziln",
+   "variant": "signlog",
+   "seed": 1337,
+   "name": "fp_ziln_signlog_1337",
+   "baseline": "es_ziln_cal1337",
+   "base_cal": 1.669211,
+   "arm_cal": 1.672043,
+   "delta": 0.002833,
+   "delta_split7": 0.002881,
+   "delta_xfit5": 0.002829,
+   "delta_raw": 0.003778,
+   "identical_to_baseline": false,
+   "log": {
+    "best_epoch": 4,
+    "epochs_run": 8,
+    "budget_exhausted": false
+   }
+  }
+ ],
+ "summary": {
+  "bin:signlog": {
+   "kind": "prep",
+   "n_seeds": 2,
+   "delta_mean": 0.002118,
+   "delta_ci95": [
+    0.001525,
+    0.002602
+   ],
+   "per_seed": {
+    "42": 0.001763,
+    "1337": 0.002472
+   },
+   "epochs_binding": false,
+   "verdict": "HURTS"
+  },
+  "mlp2:signlog": {
+   "kind": "prep",
+   "n_seeds": 2,
+   "delta_mean": 0.003409,
+   "delta_ci95": [
+    0.00281,
+    0.003953
+   ],
+   "per_seed": {
+    "42": 0.003191,
+    "1337": 0.003626
+   },
+   "epochs_binding": false,
+   "verdict": "HURTS"
+  },
+  "ziln:signlog": {
+   "kind": "prep",
+   "n_seeds": 2,
+   "delta_mean": 0.002703,
+   "delta_ci95": [
+    0.002167,
+    0.003179
+   ],
+   "per_seed": {
+    "42": 0.002573,
+    "1337": 0.002833
+   },
+   "epochs_binding": false,
+   "verdict": "HURTS"
+  }
+ },
+ "by_variant": {
+  "signlog": {
+   "n_families": 3,
+   "delta_mean": 0.002743,
+   "delta_worst_family": 0.003409
+  }
+ },
+ "missing": [
+  "fp_mlp2_clip999_42",
+  "fp_mlp2_clip999_1337",
+  "fp_mlp2_rank_42",
+  "fp_mlp2_rank_1337",
+  "fp_mlp2_noclip_42",
+  "fp_mlp2_noclip_1337",
+  "fp_bin_clip999_42",
+  "fp_bin_clip999_1337",
+  "fp_bin_rank_42",
+  "fp_bin_rank_1337",
+  "fp_bin_noclip_42",
+  "fp_bin_noclip_1337",
+  "fp_ziln_clip999_42",
+  "fp_ziln_clip999_1337",
+  "fp_ziln_rank_42",
+  "fp_ziln_rank_1337",
+  "fp_ziln_noclip_42",
+  "fp_ziln_noclip_1337",
+  "kb_bin_k15_42",
+  "kb_bin_k15_1337",
+  "kb_bin_k63_42",
+  "kb_bin_k63_1337",
+  "kb_bin_k127_42",
+  "kb_bin_k127_1337"
+ ],
+ "best_prep": "clip99",
+ "best_prep_delta": 0.0,
+ "best_kbins": null,
+ "gh_nodes": {
+  "tested": [
+   4,
+   8,
+   12,
+   16,
+   20,
+   24,
+   32,
+   64,
+   128
+  ],
+  "best": 20,
+  "delta_max_abs": 0.0,
+  "note": "квадратура сошлась: |gh20-gh128| <= 1.4e-6 на строку, калиброванный скор совпадает до девятого знака"
+ },
+ "threshold": 0.0003
+}
