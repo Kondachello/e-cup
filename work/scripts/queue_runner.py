@@ -97,7 +97,8 @@ def main():
         spec["seconds"] = round(dt)
         spec["tail"] = tail
         (DONE / spec_p.name).write_text(json.dumps(spec, ensure_ascii=False, indent=1))
-        spec_p.unlink()
+        # задание могли снять из очереди уже во время выполнения — это не ошибка
+        spec_p.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
