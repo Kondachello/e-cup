@@ -19,6 +19,7 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from common import PREDS_DIR, VAL_ANCHOR, load_anchor, rmsle
 from exp_lib import save_preds, log_score
+from model_io import save_npz
 
 
 def fit_shifts(lp: np.ndarray, ly: np.ndarray, bins: int):
@@ -74,6 +75,10 @@ def main():
     lt = np.log1p(np.clip(dt["pred"].to_numpy(), 0, None))
     ltc = apply_shifts(lt, centers, shifts)
 
+    # freeze: the shift table inference replays to turn NAME into NAME_cal
+    save_npz(f"{args.pred}_cal", centers=centers, shifts=shifts,
+             bins=np.int32(args.bins), val_rmsle=np.float64(cal_val),
+             holdout_base=np.float64(base_holdout), holdout_cal=np.float64(holdout))
     save_preds(f"{args.pred}_cal", "val", uid, np.expm1(lv))
     save_preds(f"{args.pred}_cal", "test", dt["user_id"].to_numpy(), np.expm1(ltc))
     log_score(f"{args.pred}_cal", cal_val,

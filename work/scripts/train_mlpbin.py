@@ -50,9 +50,11 @@ os.environ.setdefault("USE_V3", "1")
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from calibrate import apply_shifts, fit_shifts
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
+from model_io import save_meta, save_torch
 
 MODELS_DIR = WORK / "models"
 STATS_MAX_ROWS = 750_000   # row-subsample size for percentile/mean/std estimation
@@ -127,15 +129,39 @@ def anchor_heights(anchors) -> list[int]:
     ]
 
 
-def build_model(d_in: int, hidden: list[int], dropout: float, n_classes: int):
+def cal_holdout(lp: np.ndarray, ly: np.ndarray, y_raw: np.ndarray,
+                half: np.ndarray, bins: int = 24):
+    """Honest binned log-shift calibration: fit on half the users, score the rest.
+
+    Every model is calibrated before blending (KNOWLEDGE.md), so the calibrated
+    number is the decision-relevant one; raw scores mostly reflect the ~0.25 log
+    level bias that calibration removes anyway. Returns (raw_holdout, cal_holdout).
+    """
+    lp = np.clip(lp, 0, None)
+    c, s = fit_shifts(lp[half], ly[half], bins)
+    return (float(rmsle(y_raw[~half], np.expm1(lp[~half]))),
+            float(rmsle(y_raw[~half], np.expm1(apply_shifts(lp[~half], c, s)))))
+
+
+def build_model(d_in: int, hidden: list[int], dropout: float, n_classes: int,
+                norm: str = "layer"):
     import torch.nn as nn
+
+    def make_norm(h):
+        if norm == "layer":
+            return [nn.LayerNorm(h)]
+        if norm == "batch":
+            return [nn.BatchNorm1d(h)]
+        if norm == "none":
+            return []
+        raise ValueError(f"unknown norm {norm!r}")
 
     class BinnedMLP(nn.Module):
         def __init__(self):
             super().__init__()
             layers, prev = [], d_in
             for h in hidden:
-                layers += [nn.Linear(prev, h), nn.GELU(), nn.LayerNorm(h),
+                layers += [nn.Linear(prev, h), nn.GELU(), *make_norm(h),
                            nn.Dropout(dropout)]
                 prev = h
             self.trunk = nn.Sequential(*layers)
@@ -165,16 +191,38 @@ def train_one(X, yb, Xv, ylv, centers_t, cfg, seed, device, epochs,
               max_steps=None, tag=""):
     """One binned-MLP fit. With Xv: early stop on val rmsle, return best-epoch
     model. Without Xv: fixed `epochs` run (cosine compressed to that length)."""
+    import math
+
     import torch
     import torch.nn.functional as F
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
     model = build_model(X.shape[1], cfg["hidden"], cfg["dropout"],
-                        centers_t.shape[0]).to(device)
+                        centers_t.shape[0], cfg.get("norm", "layer")).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=cfg["wd"])
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-        opt, T_max=epochs, eta_min=cfg["lr"] * 0.01)
     n, bs, ls = X.shape[0], cfg["bs"], cfg["ls"]
+    warm = cfg.get("warmup", 0.0)
+    per_step_sched = warm > 0
+    if per_step_sched:
+        # linear warmup -> cosine over the PLANNED step budget (epochs * steps/ep,
+        # capped by max_steps); floor at 1% of lr like the epoch-wise cosine.
+        # sched_epochs (= --epochs) keeps the LR trajectory identical in the test
+        # retrain, which runs the SAME schedule but stops at best_epoch.
+        total = cfg.get("sched_epochs", epochs) * int(np.ceil(n / bs))
+        if max_steps is not None:
+            total = min(total, max_steps)
+        wsteps = max(1, int(round(warm * total)))
+
+        def lr_lambda(s):
+            if s < wsteps:
+                return (s + 1) / wsteps
+            t = (s - wsteps) / max(1, total - wsteps)
+            return 0.01 + 0.99 * 0.5 * (1.0 + math.cos(math.pi * min(1.0, t)))
+
+        sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
+    else:
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=epochs, eta_min=cfg["lr"] * 0.01)
     best, best_epoch, bad, best_state = np.inf, 0, 0, None
     steps = 0
     for ep in range(1, epochs + 1):
@@ -184,6 +232,8 @@ def train_one(X, yb, Xv, ylv, centers_t, cfg, seed, device, epochs,
         seen = 0
         for i in range(0, n, bs):
             idx = perm[i:i + bs]
+            if len(idx) < 2:
+                continue                      # BatchNorm needs >1 row
             xb = torch.from_numpy(X[idx]).to(device)
             tb = torch.from_numpy(yb[idx].astype(np.int64)).to(device)
             logits = model(xb)
@@ -194,9 +244,12 @@ def train_one(X, yb, Xv, ylv, centers_t, cfg, seed, device, epochs,
             ce_sum += loss.detach() * len(idx)
             seen += len(idx)
             steps += 1
+            if per_step_sched:
+                sched.step()
             if max_steps is not None and steps >= max_steps:
                 break
-        sched.step()
+        if not per_step_sched:
+            sched.step()
         tr_ce = float(ce_sum) / seen
         out_of_budget = max_steps is not None and steps >= max_steps
         if Xv is None:
@@ -249,6 +302,13 @@ def main():
                     help="CE label smoothing eps (e.g. 0.05); eps>0 slightly "
                          "biases the expectation decode up on zero rows")
     ap.add_argument("--hidden", type=str, default="512,256")
+    ap.add_argument("--norm", type=str, default="layer",
+                    choices=["layer", "batch", "none"],
+                    help="normalization inside each trunk block")
+    ap.add_argument("--warmup", type=float, default=0.0,
+                    help="fraction of the planned step budget spent on linear "
+                         "warmup; >0 switches the cosine schedule from per-epoch "
+                         "(T_max=--epochs) to per-step over the planned budget")
     ap.add_argument("--drop-cols", type=str, default="")
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--device", type=str, default="")
@@ -273,7 +333,8 @@ def main():
     device = args.device or ("mps" if torch.backends.mps.is_available() else "cpu")
     cfg = dict(hidden=[int(h) for h in args.hidden.split(",")], dropout=args.dropout,
                lr=args.lr, wd=args.wd, bs=args.batch, patience=args.patience,
-               ls=args.label_smoothing)
+               ls=args.label_smoothing, norm=args.norm, warmup=args.warmup,
+               sched_epochs=args.epochs)
     print(f"device={device} seeds={seeds} smoke={args.smoke} "
           f"k={args.k_bins} cfg={cfg}", flush=True)
 
@@ -352,11 +413,17 @@ def main():
         best_epochs.append(be)
         del m
     # seed averaging in decoded E[log1p] space, THEN expm1
-    pv_avg = np.expm1(np.clip(np.mean(val_elogs, axis=0), 0, None))
+    elog_avg = np.mean(val_elogs, axis=0)
+    pv_avg = np.expm1(np.clip(elog_avg, 0, None))
     score = rmsle(yv_raw, pv_avg)
+    # decision-relevant number: every model is calibrated before blending, so
+    # compare configs AFTER calibration (raw gaps are mostly level artifacts).
+    half = np.random.default_rng(0).permutation(nv) < nv // 2
+    raw_h, cal_h = cal_holdout(elog_avg, ylv, yv_raw, half)
 
     if args.smoke:
         print(f"[SMOKE] {args.name} val_rmsle={score:.6f} "
+              f"holdout raw={raw_h:.6f} cal={cal_h:.6f} "
               f"total {time.time()-t0:.0f}s", flush=True)
         return
 
@@ -364,10 +431,19 @@ def main():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(MODELS_DIR / f"{args.name}_stats.npz", **stats,
              edges=edges, centers=centers)
+    # freeze: what inference needs to rebuild this model besides the weights
+    # (bin edges/centers live in the stats npz above, they decode the logits)
+    save_meta(args.name, kind="mlpbin", feature_cols=cols, cfg=cfg, seeds=seeds,
+              best_epochs=best_epochs, d_in=d, n_classes=int(len(centers)),
+              k_bins=args.k_bins, device=device, gap_days=args.gap_days,
+              val_rmsle=float(score), stats_npz=f"{args.name}_stats.npz",
+              weights=[f"{args.name}_seed{s}.pt" for s in seeds])
     notes = args.notes or (
         f"binned-mlp k{args.k_bins} ls{args.label_smoothing} {args.hidden} "
-        f"do{args.dropout} lr{args.lr} bs{args.batch} gap{args.gap_days} "
-        f"seeds={args.seeds} {len(tr_anchors)}anch ep={best_epochs}")
+        f"do{args.dropout} norm={args.norm} warmup={args.warmup} lr{args.lr} "
+        f"bs{args.batch} gap{args.gap_days} seeds={args.seeds} "
+        f"{len(tr_anchors)}anch ep={best_epochs}")
+    notes = f"{notes}; holdout raw={raw_h:.6f} cal={cal_h:.6f}"
     log_score(args.name, score, notes)
 
     if args.no_test:
@@ -387,6 +463,7 @@ def main():
         m, _, _ = train_one(Xfull, bins_full, None, None, centers_t, cfg, seed,
                             device, max(1, be), tag=f"[s{seed} full] ")
         test_elogs.append(predict_elog(m, Xt, centers_t, device).astype(np.float64))
+        save_torch(args.name, m, seed)   # retrain weights -> work/models/
         del m
     pt = np.expm1(np.clip(np.mean(test_elogs, axis=0), 0, None))
     save_preds(args.name, "test", uid_t, pt)

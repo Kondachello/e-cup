@@ -121,16 +121,19 @@ def schedule(n_trees: int, chunk_real: int, chunk_mix: int) -> list[tuple[str, i
     return out
 
 
-def weight_vectors(n_real: int, n_pseudo: int, wp: float):
-    """(off, on) weight vectors.  LightGBM silently drops an all-ones weight array
-    (Dataset.set_weight: `if np.all(weight == 1): weight = None`) and then keeps
-    the PREVIOUS weights -- verified.  Never emit all-ones."""
-    if n_pseudo == 0:
+def weight_vectors(n_total: int, sl: slice | None, wp: float):
+    """(off, on) weight vectors for a row block `sl` holding the pseudo rows.
+
+    LightGBM silently drops an all-ones weight array (Dataset.set_weight:
+    `if np.all(weight == 1): weight = None`) and then keeps the PREVIOUS
+    weights -- verified.  Never emit all-ones."""
+    if sl is None:
         return None, None
     if wp == 1.0:
         wp = 0.999999
-    off = np.concatenate([np.ones(n_real), np.zeros(n_pseudo)])
-    on = np.concatenate([np.ones(n_real), np.full(n_pseudo, wp)])
+    off, on = np.ones(n_total), np.ones(n_total)
+    off[sl] = 0.0
+    on[sl] = wp
     return off, on
 
 
@@ -209,42 +212,56 @@ def main():
     half = np.random.default_rng(0).permutation(n_users) < n_users // 2  # same split as calibrate.py
     print(f"{len(cols)} features, {n_users} users", flush=True)
 
-    # ---- real rows
-    X = np.empty((len(tr_anchors) * n_users, len(cols)), np.float32)
-    y = np.empty(len(tr_anchors) * n_users, np.float64)
-    for i, a in enumerate(tr_anchors):
-        df = load_anchor(a, ["user_id", "target"] + cols)
-        assert df.height == n_users, f"{a}: {df.height} rows"
-        X[i * n_users:(i + 1) * n_users] = df.select(cols).to_numpy().astype(np.float32)
-        y[i * n_users:(i + 1) * n_users] = np.log1p(df["target"].to_numpy().astype(np.float64))
-        del df
-    n_real = X.shape[0]
-
-    # ---- pseudo rows (test slice features + soft targets)
+    # ---- test slice: features for prediction AND (optionally) the pseudo rows
     test = load_anchor(TEST_ANCHOR)
     Xt = test.select(cols).to_numpy().astype(np.float32)
     uid_t = test["user_id"].to_numpy()
     del test
-    t_note = "none"
+    t_note, soft = "none", None
     if args.no_pseudo:
         n_pseudo, wp = 0, 0.0
     else:
         soft, t_note = teacher_logs(args.teacher, uid_t)
         wp = 0.0 if args.zero_pseudo else args.pseudo_weight
-        X = np.vstack([X, Xt])
-        y = np.concatenate([y, soft])
         n_pseudo = n_users
-    print(f"rows: real {n_real} + pseudo {n_pseudo} (weight {wp}); "
+
+    # Row layout [ real_train | pseudo | retrain_extra ] in ONE allocation: the val
+    # stage trains on the contiguous prefix, the test stage on the whole thing.  A
+    
+    add = []
+    if not args.no_test:
+        if args.retrain_gap:
+            add = [a for a in available_train_anchors()
+                   if VAL_ANCHOR - timedelta(days=args.gap_days) < a < VAL_ANCHOR]
+        add = add + [VAL_ANCHOR]
+    n_real = len(tr_anchors) * n_users
+    n_add = len(add) * n_users
+    X = np.empty((n_real + n_pseudo + n_add, len(cols)), np.float32)
+    y = np.empty(n_real + n_pseudo + n_add, np.float64)
+    for i, a in enumerate(tr_anchors + add):
+        off = i * n_users if i < len(tr_anchors) else n_real + n_pseudo + (i - len(tr_anchors)) * n_users
+        df = load_anchor(a, ["user_id", "target"] + cols)
+        assert df.height == n_users, f"{a}: {df.height} rows"
+        X[off:off + n_users] = df.select(cols).to_numpy().astype(np.float32)
+        y[off:off + n_users] = np.log1p(df["target"].to_numpy().astype(np.float64))
+        del df
+    ps_slice = None
+    if n_pseudo:
+        X[n_real:n_real + n_pseudo] = Xt
+        y[n_real:n_real + n_pseudo] = soft
+        ps_slice = slice(n_real, n_real + n_pseudo)
+    n_fit = n_real + n_pseudo                       # rows used in the val stage
+    print(f"rows: real {n_real} + pseudo {n_pseudo} (weight {wp}) + retrain-extra {n_add}; "
           f"mean log-target real {y[:n_real].mean():.4f}"
-          + (f" pseudo {y[n_real:].mean():.4f}" if n_pseudo else "")
+          + (f" pseudo {y[ps_slice].mean():.4f}" if n_pseudo else "")
           + f" | val {yv_log.mean():.4f} [{time.time()-t0:.0f}s]", flush=True)
 
     sched = schedule(args.n_trees, args.chunk_real, args.chunk_mix if n_pseudo else 0)
     print(f"schedule: {sched}", flush=True)
 
     import lightgbm as lgb
-    w_off, w_on = weight_vectors(n_real, n_pseudo, wp)
-    ds = lgb.Dataset(X, y, weight=w_off, free_raw_data=False)
+    w_off, w_on = weight_vectors(n_fit, ps_slice, wp)
+    ds = lgb.Dataset(X[:n_fit], y[:n_fit], weight=w_off, free_raw_data=False)
 
     curve = []
 
@@ -260,16 +277,19 @@ def main():
               f"[{time.time()-t0:.0f}s]", flush=True)
 
     booster = run_schedule(ds, params, sched, w_off, w_on, args.seed, ev)
-    lp_val = np.clip(booster.predict(Xv), 0, None)
-    score = rmsle(yv_raw, np.expm1(lp_val))
     best = min(curve, key=lambda c: c["holdout_cal"])
+    # save val preds at the SELECTED iteration (train_gbdt does the same via
+    # early stopping) so calibration is fitted on the same model the test preds come from
+    lp_val = np.clip(booster.predict(Xv, num_iteration=best["trees"]), 0, None)
+    score = rmsle(yv_raw, np.expm1(lp_val))
     print(f"[VAL] {args.name} raw={score:.6f} cal_holdout={curve[-1]['holdout_cal']:.6f} "
           f"| best cal {best['holdout_cal']:.6f} @ {best['trees']} trees", flush=True)
     save_preds(args.name, "val", uid_val, np.expm1(lp_val))
+    warn = "" if args.no_pseudo else "; WARNING trained on teacher preds -- do NOT drop into the *_cal blend pool blindly (circular with the teacher)"
     note = (args.notes or
             f"pseudo teacher={t_note} w={wp} sched(real{args.chunk_real}/mix{args.chunk_mix}) "
             f"{len(tr_anchors)}sl {args.n_trees}t gap{args.gap_days}; "
-            f"cal_holdout={curve[-1]['holdout_cal']:.6f}")
+            f"best cal_holdout={best['holdout_cal']:.6f} @{best['trees']}t{warn}")
     log_score(args.name, score, note)
 
     rep = dict(name=args.name, teacher=t_note, pseudo_weight=wp, n_pseudo=n_pseudo,
@@ -287,35 +307,17 @@ def main():
         return
 
     # ---------------------------------------------------------------- retrain -> test
-    del ds, booster
+    # the extra slices are already sitting in the tail of X/y; nothing to reallocate
+    del ds, booster, Xv
     best_it = best["trees"]
-    extra = []
-    if args.retrain_gap:
-        extra = [a for a in available_train_anchors()
-                 if VAL_ANCHOR - timedelta(days=args.gap_days) < a < VAL_ANCHOR]
-    add = extra + [VAL_ANCHOR]
     print(f"[retrain] adding {[a.isoformat() for a in add]}", flush=True)
-    Xa = np.empty((len(add) * n_users, len(cols)), np.float32)
-    ya = np.empty(len(add) * n_users, np.float64)
-    for i, a in enumerate(add):
-        df = load_anchor(a, ["user_id", "target"] + cols)
-        Xa[i * n_users:(i + 1) * n_users] = df.select(cols).to_numpy().astype(np.float32)
-        ya[i * n_users:(i + 1) * n_users] = np.log1p(df["target"].to_numpy().astype(np.float64))
-        del df
-    if n_pseudo:  # keep pseudo rows last so the weight vectors stay valid
-        X = np.vstack([X[:n_real], Xa, X[n_real:]])
-        y = np.concatenate([y[:n_real], ya, y[n_real:]])
-    else:
-        X = np.vstack([X, Xa])
-        y = np.concatenate([y, ya])
-    n_real2 = n_real + Xa.shape[0]
-    del Xa, ya, Xv
+    n_real2 = n_real + n_add
     row_ratio = n_real2 / n_real
     iter_mult = 1.0 + 0.7 * max(row_ratio - 1.0, 0.0)
     n_trees2 = max(50, int(best_it * iter_mult))
     print(f"[retrain] rows real {n_real2} + pseudo {n_pseudo}; row_ratio={row_ratio:.3f} "
           f"iter_mult={iter_mult:.3f} trees {best_it}->{n_trees2}", flush=True)
-    w_off2, w_on2 = weight_vectors(n_real2, n_pseudo, wp)
+    w_off2, w_on2 = weight_vectors(X.shape[0], ps_slice, wp)
     ds2 = lgb.Dataset(X, y, weight=w_off2, free_raw_data=False)
     sched2 = schedule(n_trees2, args.chunk_real, args.chunk_mix if n_pseudo else 0)
     booster = run_schedule(ds2, params, sched2, w_off2, w_on2, args.seed)

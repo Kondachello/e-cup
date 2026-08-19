@@ -34,6 +34,22 @@ V8_FEATS = [
     "wk_ent90", "wk_ent90_sh", "wk_cv_iei",
 ]
 
+# v10 tier = per-channel conversion funnels (build_features_v10.py). Kept here so
+# load_anchor can null-fill uncovered anchors without importing the builder.
+V10_WINDOWS = (30, 90, 365)
+V10_PER_WIN = [
+    "s_srch2cart", "s_cart2ord", "c_cart_pday", "c_cart2ord", "s_cart_psday",
+    "cart_sshare", "ord_sshare", "aband_sshare",
+    "s_aov", "c_aov", "s_aband", "c_aband",
+    "s2c", "c2c", "s2o", "c2o",
+]
+V10_TRENDS = ["s_srch2cart", "s_cart2ord", "c_cart2ord", "s_cart_psday",
+              "cart_sshare", "ord_sshare", "s_aov", "c_aov"]
+# v10_s2o_90 / v10_c2o_90 dropped: rank-identical to v2's s2o_cnt_90 / c2o_cnt_90
+V10_DROP = {"v10_s2o_90", "v10_c2o_90"}
+V10_FEATS = [f for f in ([f"v10_{b}_{w}" for w in V10_WINDOWS for b in V10_PER_WIN]
+                         + [f"v10_tr_{b}" for b in V10_TRENDS]) if f not in V10_DROP]
+
 
 def train_anchors(n: int = 14, stride: int = 14) -> list[date]:
     """Training anchors strictly before VAL_ANCHOR, newest first in time order."""
@@ -68,6 +84,7 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     v6 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v6.parquet"
     v7 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v7.parquet"
     v8 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v8.parquet"
+    v10 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v10.parquet"
     seqoof = FEATURES_DIR / f"anchor={anchor.isoformat()}.seqoof.parquet"
     use2 = extra.exists() and os.environ.get("USE_V2")
     use3 = v3.exists() and os.environ.get("USE_V3")
@@ -75,8 +92,9 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     use6 = v6.exists() and os.environ.get("USE_V6")
     use7 = os.environ.get("USE_V7")
     use8 = os.environ.get("USE_V8")
+    use10 = os.environ.get("USE_V10")
     useoof = os.environ.get("USE_SEQOOF")
-    if not (use2 or use3 or use4 or use6 or use7 or use8 or useoof):
+    if not (use2 or use3 or use4 or use6 or use7 or use8 or use10 or useoof):
         return pl.read_parquet(p, columns=columns)
     df = pl.read_parquet(p)
     if use2:
@@ -101,6 +119,13 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
         else:
             df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
                                   for c in V8_FEATS])
+    if use10:
+        # v10 = per-channel conversion funnel tier; uncovered anchors get nulls
+        if v10.exists():
+            df = df.join(pl.read_parquet(v10), on="user_id", how="left")
+        else:
+            df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
+                                  for c in V10_FEATS])
     if useoof:
         if seqoof.exists():
             df = df.join(pl.read_parquet(seqoof), on="user_id", how="left")

@@ -23,6 +23,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from common import VAL_ANCHOR, TEST_ANCHOR, rmsle, load_anchor, feature_cols
 from exp_lib import available_train_anchors, load_matrix, save_preds, log_score
+from model_io import booster_filename, save_booster, save_meta
 
 RETRAIN_ITER_MULT = 1.07
 
@@ -284,6 +285,7 @@ def main():
         segs.append(np.ones(len(yv_raw)))
         return np.concatenate(segs)
 
+    m_hat_test = 0.0   # detrend level added back at predict (log_mse+--detrend only)
     if args.objective == "two_stage":
         raw_all = cat_y(y_raw, yv_raw)
         yb_all = (raw_all > 0).astype(np.float64)
@@ -295,13 +297,15 @@ def main():
         wpos_all = w_all[pos_all] if w_all is not None else None
         params2["n_estimators" if args.model != "cb" else "iterations"] = max(50, int(it2 * iter_mult))
         m2f, _ = fitter(Xall[pos_all], ylog_all, wpos_all, None, None, params2, "log_mse", args.seed + 1)
+        # freeze: retrained boosters -> work/models/ (stage1 = P(y>0), stage2 = E[log1p|>0])
+        save_booster(args.model, args.name, m1f, tag="stage1")
+        save_booster(args.model, args.name, m2f, tag="stage2")
         p_t = predict(args.model, m1f, Xt)
         if args.model == "cb":
             p_t = 1.0 / (1.0 + np.exp(-p_t))
         mu_t = predict(args.model, m2f, Xt)
         pt = np.expm1(np.clip(p_t * np.clip(mu_t, 0, None), 0, None))
     else:
-        m_hat_test = 0.0
         if args.objective == "log_mse" and args.detrend:
             assert not args.gap_days, "--detrend with --gap-days is not supported"
             yv_own_mean = float(np.log1p(yv_raw).mean())
@@ -317,9 +321,20 @@ def main():
         w_all = cat_w(w)
         params["n_estimators" if args.model != "cb" else "iterations"] = max(50, int(best_it * iter_mult))
         mf, _ = fitter(Xall, y_all, w_all, None, None, params, args.objective, args.seed)
+        save_booster(args.model, args.name, mf)   # freeze: retrained booster
         raw_pt = predict(args.model, mf, Xt)
         pt = np.expm1(np.clip(raw_pt + m_hat_test, 0, None)) if args.objective == "log_mse" else np.clip(raw_pt, 0, None)
 
+    # freeze: what inference needs to reuse the boosters above
+    two = args.objective == "two_stage"
+    save_meta(args.name, kind="gbdt", model=args.model, objective=args.objective,
+              feature_cols=cols, params=params, params2=params2 if two else None,
+              seed=args.seed, gap_days=args.gap_days, detrend=bool(args.detrend),
+              m_hat_test=float(m_hat_test), active_only=bool(args.active_only),
+              weight_tau=args.weight_tau, n_anchors=len(tr_anchors),
+              val_rmsle=float(score),
+              weights=[booster_filename(args.model, args.name, t)
+                       for t in (("stage1", "stage2") if two else (None,))])
     save_preds(args.name, "test", uid_t, pt)
     print(f"[DONE] {args.name} val_rmsle={score:.6f} total {time.time()-t0:.0f}s", flush=True)
 

@@ -1,16 +1,23 @@
-"""FUSION model: tabular features + daily-sequence transformer, hurdle heads.
+"""FUSION v3: tabular features + daily-sequence transformer on the seq3 tensors.
+
+Same architecture and protocol as train_fusion.py.  Differences: the sequence input is
+work/seq3 (uint8 [250k, 112, 12], dequantised per channel; channels 8..11 are the
+per-channel funnel counters that never reached the tensors before), and --n-ch
+truncates the tensor to its first N channels.  --n-ch 12 = the new arm, --n-ch 8 =
+STRICT CONTROL: same anchors, same L=112, same quantisation, only the funnel channels
+removed, so the delta isolates the new channels rather than L=112-vs-196.
 
 Per user, two inputs:
   (a) tabular: work/features anchors (USE_V2=1 USE_V3=1, ~194 cols), preprocessing
       exactly like train_mlp2 — median impute -> clip [p1,p99] -> standardize,
       stats fit on the SELECTION train anchors only, reused for val/test/final.
       Stored standardized as float16 (cast to f32 per batch).
-  (b) sequence: work/seq2/anchor=DATE.npy float16 [250k, 196 days, 8 ch],
+  (b) sequence: work/seq3/anchor=DATE.npy uint8 [250k, 112 days, 12 ch] * SCALES,
       np.load(mmap_mode='r'); row order == sample_submit sorted user_id ==
       features-parquet row order (asserted per anchor).
 
 Model:
-  seq encoder : Conv1d(8->96, k=7, s=7) + pos emb -> 2-layer TransformerEncoder
+  seq encoder : Conv1d(n_ch->96, k=7, s=7) + pos emb -> 2-layer TransformerEncoder
                 (4 heads, ff 192, norm_first) -> concat(mean, last) = 192
   tab encoder : Linear(F->256) GELU LayerNorm
   fusion trunk: concat(448) -> [Linear 384 GELU LN Drop(0.15)] -> [Linear 256
@@ -25,16 +32,16 @@ Phases (train_seq2 contract):
     <= 2025-12-10), early stop on VAL RMSLE (eval every --eval-every steps,
     patience 3 evals); non-smoke saves val preds (exp_lib.save_preds) +
     log_score under NAME + models/NAME_stats.npz.
-  --final: additionally retrain on ALL 12 seq2 anchors + VAL for --epochs
+  --final: additionally retrain on ALL seq3 anchors + VAL for --epochs
     epochs (no early stop), save TEST preds. Multi-seed: raw-GMV averaging.
 
 Smoke: --smoke = 1 train anchor, <=200 optimizer steps, batch <=1024, val
 rows ::5, single seed, NOTHING written; prints one JSON line with val_rmsle.
 
 Usage:
-  .venv/bin/python work/scripts/train_fusion.py --name fusion_smoke --smoke --threads 2
-  .venv/bin/python work/scripts/train_fusion.py --name fusion_a --epochs 6 --seeds 42,1337
-  .venv/bin/python work/scripts/train_fusion.py --name fusion_f --epochs 6 --final
+  .venv/bin/python work/scripts/train_fusion3.py --name f3_smoke --smoke --threads 2
+  .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3 --final --epochs 3
+  .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3ctl --final --epochs 3 --n-ch 8
 """
 from __future__ import annotations
 
@@ -66,12 +73,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import (TEST_ANCHOR, VAL_ANCHOR, WORK, feature_cols,  # noqa: E402
                     load_anchor, rmsle, user_universe)
 from exp_lib import log_score, save_preds  # noqa: E402
-from model_io import save_meta, save_torch  # noqa: E402
 
-SEQ_DIR = WORK / "seq2"
+SEQ_DIR = WORK / "seq3"
 MODELS_DIR = WORK / "models"
 N_USERS = 250_000
-L, C = 196, 8
+_Q = json.loads((SEQ_DIR / "quant.json").read_text())
+L, C_ALL = int(_Q["L"]), int(_Q["C"])
+assert (L, C_ALL, _Q["dtype"]) == (112, 12, "uint8"), _Q
+assert L % 7 == 0, "conv stride 7 needs L divisible by 7"
+SCALES_ALL = np.asarray(_Q["scales"], dtype=np.float32)
+NCH = C_ALL            # overwritten from --n-ch in main()
+SCALE = SCALES_ALL     # dequant scale of the first NCH channels
 STATS_MAX_ROWS = 750_000
 SMOKE_MAX_STEPS = 200
 SMOKE_MAX_BATCH = 1024
@@ -94,6 +106,8 @@ def parse_args():
     p.add_argument("--aux-w", type=float, default=0.3)
     p.add_argument("--seeds", default="42", help='e.g. "42,1337"')
     p.add_argument("--threads", type=int, default=2)
+    p.add_argument("--n-ch", type=int, default=12,
+                   help="use the first N sequence channels (12 = v3, 8 = seq2-equivalent control)")
     p.add_argument("--device", default="", help="cpu|mps (default: auto)")
     p.add_argument("--smoke", action="store_true",
                    help="1 anchor, <=200 steps, batch<=1024, val ::5, no saves")
@@ -107,7 +121,7 @@ def parse_args():
 
 # ---------------- data ----------------
 
-def seq2_train_anchors() -> list[date]:
+def seq3_train_anchors() -> list[date]:
     out = []
     for p in sorted(SEQ_DIR.glob("anchor=*.npy")):
         if p.name.endswith(".target.npy"):
@@ -120,8 +134,17 @@ def seq2_train_anchors() -> list[date]:
 
 def open_x(a: date):
     x = np.load(SEQ_DIR / f"anchor={a.isoformat()}.npy", mmap_mode="r")
-    assert x.shape == (N_USERS, L, C), f"{a}: bad seq shape {x.shape}"
+    assert x.shape == (N_USERS, L, C_ALL), f"{a}: bad seq shape {x.shape}"
+    assert x.dtype == np.uint8, f"{a}: bad seq dtype {x.dtype}"
     return x
+
+
+def take_seq(x_mm, rows) -> np.ndarray:
+    """Gather rows of a uint8 seq memmap -> float32 [B, L, NCH] in seq2 units."""
+    a = x_mm[rows]
+    if NCH != C_ALL:
+        a = a[:, :, :NCH]
+    return a.astype(np.float32) * SCALE
 
 
 def load_y(a: date):
@@ -188,7 +211,7 @@ def build_model(d_tab: int, dropout: float, device, tab_dim: int = 256,
     class FusionNet(nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv = nn.Conv1d(C, 96, kernel_size=7, stride=7)  # 196 -> 28 tokens
+            self.conv = nn.Conv1d(NCH, 96, kernel_size=7, stride=7)  # 112 -> 16 tokens
             self.pos = nn.Parameter(torch.zeros(1, L // 7, 96))
             nn.init.trunc_normal_(self.pos, std=0.02)
             layer = nn.TransformerEncoderLayer(
@@ -208,8 +231,8 @@ def build_model(d_tab: int, dropout: float, device, tab_dim: int = 256,
             self.head_mu = nn.Linear(prev, 1)      # E[log1p(y30) | y30>0]
             self.head_aux = nn.Linear(prev, 2)     # log1p(y7), log1p(y14)
 
-        def forward(self, xseq, xtab):            # [B,196,8] f32, [B,F] f32
-            h = self.conv(xseq.transpose(1, 2)).transpose(1, 2) + self.pos  # [B,28,96]
+        def forward(self, xseq, xtab):            # [B,112,NCH] f32, [B,F] f32
+            h = self.conv(xseq.transpose(1, 2)).transpose(1, 2) + self.pos  # [B,16,96]
             h = self.enc(h)
             zs = torch.cat([h.mean(dim=1), h[:, -1]], dim=1)                # [B,192]
             z = self.trunk(torch.cat([zs, self.tab(xtab)], dim=1))          # [B,256]
@@ -218,7 +241,7 @@ def build_model(d_tab: int, dropout: float, device, tab_dim: int = 256,
 
     model = FusionNet().to(device)
     n_par = sum(p.numel() for p in model.parameters())
-    print(f"model=fusion d_tab={d_tab} params={n_par:,}", flush=True)
+    print(f"model=fusion3 d_tab={d_tab} n_ch={NCH} L={L} params={n_par:,}", flush=True)
     return model
 
 
@@ -230,7 +253,7 @@ def predict_log(model, x_mm, xtab, idx, device, eval_batch):
     with torch.no_grad():
         for s in range(0, len(idx), eval_batch):
             rows = idx[s:s + eval_batch]
-            xs_b = torch.from_numpy(x_mm[rows].astype(np.float32)).to(device)
+            xs_b = torch.from_numpy(take_seq(x_mm, rows)).to(device)
             xt_b = torch.from_numpy(xtab[rows].astype(np.float32)).to(device)
             logit, mu, _ = model(xs_b, xt_b)
             pl_ = torch.sigmoid(logit) * torch.clamp(mu, min=0)
@@ -293,7 +316,7 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
             perm = rng.permutation(N_USERS)
             for s0 in range(0, N_USERS, args.batch):
                 rows = np.sort(perm[s0:s0 + args.batch])
-                xb = torch.from_numpy(xs[ai][rows].astype(np.float32)).to(device)
+                xb = torch.from_numpy(take_seq(xs[ai], rows)).to(device)
                 tb = torch.from_numpy(tabs[ai][rows].astype(np.float32)).to(device)
                 yb = torch.from_numpy(ylogs[ai][rows]).to(device)
                 bb = torch.from_numpy(ybuys[ai][rows]).to(device)
@@ -340,16 +363,21 @@ def main():
         seeds = seeds[:1]
         args.batch = min(args.batch, SMOKE_MAX_BATCH)
         args.final = False
-    name = args.name or "fusion"
+    name = args.name or "fusion3"
+    global NCH, SCALE
+    assert 1 <= args.n_ch <= C_ALL, f"--n-ch must be 1..{C_ALL}"
+    NCH = args.n_ch
+    SCALE = SCALES_ALL[:NCH]
 
     import torch
     torch.set_num_threads(args.threads)
     device = args.device or ("mps" if torch.backends.mps.is_available() else "cpu")
 
-    all_train = seq2_train_anchors()
+    all_train = seq3_train_anchors()
     clean = [a for a in all_train if a + timedelta(days=30) <= VAL_ANCHOR]
     p1_anchors = clean[-1:] if args.smoke else clean
     print(f"device={device} name={name} seeds={seeds} smoke={args.smoke} "
+          f"seq={SEQ_DIR.name} L={L} n_ch={NCH}/{C_ALL} "
           f"threads={args.threads} bs={args.batch} lr={args.lr:g} wd={args.wd:g} "
           f"bce_w={args.bce_w} aux_w={args.aux_w} do={args.dropout}", flush=True)
     print(f"all train anchors ({len(all_train)}): "
@@ -441,7 +469,7 @@ def main():
     if args.smoke:
         import resource
         rss_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**30
-        print(json.dumps({"name": name, "smoke": True,
+        print(json.dumps({"name": name, "smoke": True, "n_ch": NCH, "L": L,
                           "val_rmsle": round(float(ens_rmsle), 6),
                           "best_steps": best_steps,
                           "peak_rss_gb": round(rss_gb, 2),
@@ -451,7 +479,8 @@ def main():
     save_preds(name, "val", uids, ens_val)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(MODELS_DIR / f"{name}_stats.npz", **stats)
-    notes = (f"fusion conv7-tr2 + tab{d_tab}->{args.tab_dim} trunk{args.trunk} "
+    notes = (f"fusion3 seq3 L{L} ch{NCH} conv7-tr2 + tab{d_tab}->{args.tab_dim} "
+             f"trunk{args.trunk} "
              f"hurdle bce_w{args.bce_w} aux{args.aux_w} "
              f"do{args.dropout} b{args.batch} lr{args.lr:g} wd{args.wd:g} ep{args.epochs} "
              f"seeds={','.join(map(str, seeds))} best_steps={best_steps} "
@@ -491,18 +520,7 @@ def main():
             t_raw = np.expm1(np.clip(t_log, 0, None)).astype(np.float64)
             test_sum = t_raw if test_sum is None else test_sum + t_raw
             print(f"[p2 seed {seed}] steps {steps2} test mean {t_raw.mean():.2f}", flush=True)
-            save_torch(name, model2, seed)   # retrain weights -> work/models/
             del model2
-        # freeze: what inference needs to rebuild this model besides the weights
-        save_meta(name, kind="fusion", feature_cols=cols, d_tab=d_tab,
-                  tab_dim=args.tab_dim, trunk=args.trunk, dropout=args.dropout,
-                  bce_w=args.bce_w, aux_w=args.aux_w, seq_len=L, n_channels=C,
-                  n_users=N_USERS, seeds=seeds, best_steps=best_steps,
-                  epochs=args.epochs, batch=args.batch, lr=args.lr, wd=args.wd,
-                  device=device, val_rmsle=float(ens_rmsle),
-                  stats_npz=f"{name}_stats.npz",
-                  seq_dir=str(SEQ_DIR.relative_to(WORK.parent)),
-                  weights=[f"{name}_seed{s}.pt" for s in seeds])
         ens_test = test_sum / len(seeds)
         save_preds(name, "test", uids, ens_test)
         print(f"saved test preds: mean {ens_test.mean():.2f} "

@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
+from model_io import save_meta, save_torch
 
 MODELS_DIR = WORK / "models"
 STATS_MAX_ROWS = 750_000   # row-subsample size for percentile/mean/std estimation
@@ -388,6 +389,13 @@ def main():
              ziln_val_p=np.stack(cal_p).astype(np.float32),
              ziln_val_mu=np.stack(cal_mu).astype(np.float32),
              ziln_val_sigma=np.stack(cal_sigma).astype(np.float32))
+    # freeze: what inference needs to rebuild this model besides the weights
+    save_meta(args.name, kind="mlpziln", feature_cols=cols, cfg=cfg,
+              seeds=seeds, best_epochs=best_epochs, d_in=d, device=device,
+              gap_days=args.gap_days, gh_points=len(GH_X),
+              sigma_max=SIGMA_MAX, val_rmsle=float(score),
+              stats_npz=f"{args.name}_stats.npz",
+              weights=[f"{args.name}_seed{s}.pt" for s in seeds])
     notes = args.notes or (
         f"ziln-mlp {args.hidden} bce_w{args.bce_w} do{args.dropout} "
         f"lr{args.lr} bs{args.batch} gap{args.gap_days} seeds={args.seeds} "
@@ -411,6 +419,7 @@ def main():
         m, _, _ = train_one(Xfull, ylog_full, logy_full, None, None, cfg, seed,
                             device, max(1, be), tag=f"[s{seed} full] ")
         test_preds.append(np.expm1(np.clip(predict_log(m, Xt, device), 0, None)))
+        save_torch(args.name, m, seed)   # retrain weights -> work/models/
         del m
     save_preds(args.name, "test", uid_t, np.mean(test_preds, axis=0))
     print(f"[DONE] {args.name} val_rmsle={score:.6f} "

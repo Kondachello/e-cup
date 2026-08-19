@@ -55,6 +55,7 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from common import FEATURES_DIR, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor, rmsle
 from exp_lib import log_score, save_preds
+from model_io import booster_filename, save_lgb, save_meta
 from train_gbdt import fit_lgb
 
 DIRECT_CHAMPION = 1.6927  # twl_repair_ab (lgb tweedie1.45 on log1p, gap30, 14 anchors)
@@ -336,6 +337,7 @@ def main():
     mf, _ = fit_lgb(Xall, np.log1p(cnt_all), None, None, None, p, "log_mse",
                     args.seed)
     pc_test = mf.predict(Xt)
+    save_lgb(args.name, mf, tag="count")   # freeze: retrained count head
     del mf
 
     p = dict(params_aov); p["n_estimators"] = max(50, int(it_aov * mult_aov))
@@ -349,8 +351,17 @@ def main():
         mf, _ = fit_lgb(Xall, uplift_target(y_all, cnt_all), None, None, None,
                         p, "log_mse", args.seed + 1)
     p2_test = mf.predict(Xt)
+    save_lgb(args.name, mf, tag="aov")     # freeze: retrained AOV head
     del mf, Xall
 
+    # freeze: what inference needs to recombine the two heads
+    save_meta(args.name, kind="countaov", model="lgb", mode=mode,
+              feature_cols=cols, params_cnt=params_cnt, params_aov=params_aov,
+              aov_damp=args.aov_damp, seed=args.seed, gap_days=args.gap_days,
+              n_anchors=len(tr_anchors), val_rmsle=float(score),
+              dampfit_best=None if not use_dampfit else float(dampfit["best"]),
+              weights=[booster_filename("lgb", args.name, t)
+                       for t in ("count", "aov")])
     save_preds(args.name, "test", uid_t, COMBINE[mode](pc_test, p2_test, args.aov_damp))
     if use_dampfit:
         save_preds(f"{args.name}_dampfit", "test", uid_t,

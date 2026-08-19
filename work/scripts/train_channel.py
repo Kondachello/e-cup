@@ -48,6 +48,7 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from common import FEATURES_DIR, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor, rmsle
 from exp_lib import log_score, save_preds
+from model_io import booster_filename, save_lgb, save_meta, save_npz
 from train_gbdt import fit_lgb
 
 DIRECT_CHAMPION = 1.6927  # twl_repair_ab (lgb tweedie1.45 on log1p, gap30, 14 anchors)
@@ -249,6 +250,11 @@ def main():
                   f"{base_holdout:.6f}->{cal['holdout']:.6f}; "
                   f"ch_holdout s={cal['ch_holdout']['search']:.4f} "
                   f"c={cal['ch_holdout']['cat']:.4f}")
+        # freeze: the calibration inference must replay to rebuild NAME_chcal
+        save_npz(f"{args.name}_chcal",
+                 k=np.float64(cal["k"]), cal_bins=np.int32(args.cal_bins),
+                 **{f"{c}_{part}": cal["shifts"][c][i]
+                    for c in CHANNELS for i, part in enumerate(("centers", "shifts"))})
     print("RESULT " + json.dumps({
         "name": args.name, "total": round(score, 6),
         "search": round(ch_score["search"], 6), "cat": round(ch_score["cat"], 6),
@@ -295,8 +301,18 @@ def main():
         mf, _ = fit_lgb(Xall, np.concatenate(y_parts[c]), None, None, None,
                         p, "log_mse", args.seed + i)
         pred_test_log[c] = mf.predict(Xt)
+        save_lgb(args.name, mf, tag=c)   # freeze: per-channel retrained booster
         del mf
 
+    # freeze: what inference needs to reuse the two channel boosters
+    save_meta(args.name, kind="channel", model="lgb", channels=list(CHANNELS),
+              feature_cols=cols, params=params_ch, seed=args.seed,
+              gap_days=args.gap_days, n_anchors=len(tr_anchors),
+              best_it=best_it, iter_mult=float(iter_mult),
+              val_rmsle=float(score),
+              calibrated_name=None if cal is None else f"{args.name}_chcal",
+              calibration_npz=None if cal is None else f"{args.name}_chcal.npz",
+              weights=[booster_filename("lgb", args.name, c) for c in CHANNELS])
     save_preds(args.name, "test", uid_t, combine(pred_test_log))
     if cal is not None:
         save_preds(f"{args.name}_chcal", "test", uid_t,

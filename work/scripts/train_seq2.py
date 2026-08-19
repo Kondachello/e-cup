@@ -45,6 +45,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import TEST_ANCHOR, VAL_ANCHOR, WORK, rmsle, user_universe  # noqa: E402
 from exp_lib import log_score, save_preds  # noqa: E402
+from model_io import save_meta, save_torch  # noqa: E402
 
 SEQ_DIR = WORK / "seq2"
 N_USERS = 250_000
@@ -356,7 +357,15 @@ def main():
             t_raw = np.expm1(np.clip(t_log, 0, None)).astype(np.float64)
             test_sum = t_raw if test_sum is None else test_sum + t_raw
             print(f"[p2 seed {seed}] steps {steps2} test mean {t_raw.mean():.2f}", flush=True)
+            save_torch(name, model2, seed)   # retrain weights -> work/models/
             del model2
+        # freeze: what inference needs to rebuild this model besides the weights
+        save_meta(name, kind="seq2", arch=args.arch, seq_len=L, n_channels=C,
+                  n_users=N_USERS, seeds=seeds, best_steps=best_steps,
+                  epochs=args.epochs, batch=args.batch, lr=args.lr, wd=args.wd,
+                  device=device, val_rmsle=float(ens_rmsle),
+                  seq_dir=str(SEQ_DIR.relative_to(WORK.parent)),
+                  weights=[f"{name}_seed{s}.pt" for s in seeds])
         ens_test = test_sum / len(seeds)
         save_preds(name, "test", uids, ens_test)
         print(f"saved test preds: mean {ens_test.mean():.2f} "

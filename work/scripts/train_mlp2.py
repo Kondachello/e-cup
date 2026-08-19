@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
+from model_io import save_meta, save_torch
 
 MODELS_DIR = WORK / "models"
 STATS_MAX_ROWS = 750_000   # row-subsample size for percentile/mean/std estimation
@@ -320,6 +321,12 @@ def main():
     save_preds(args.name, "val", uid_val, pv_avg)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(MODELS_DIR / f"{args.name}_stats.npz", **stats)
+    # freeze: what inference needs to rebuild this model besides the weights
+    save_meta(args.name, kind="mlp2", feature_cols=cols, cfg=cfg, seeds=seeds,
+              best_epochs=best_epochs, d_in=d, device=device,
+              gap_days=args.gap_days, val_rmsle=float(score),
+              stats_npz=f"{args.name}_stats.npz",
+              weights=[f"{args.name}_seed{s}.pt" for s in seeds])
     notes = args.notes or (
         f"hurdle-mlp {args.hidden} bce_w{args.bce_w} do{args.dropout} "
         f"lr{args.lr} bs{args.batch} gap{args.gap_days} seeds={args.seeds} "
@@ -343,6 +350,7 @@ def main():
         m, _, _ = train_one(Xfull, ylog_full, None, None, cfg, seed, device,
                             max(1, be), tag=f"[s{seed} full] ")
         test_preds.append(np.expm1(np.clip(predict_log(m, Xt, device), 0, None)))
+        save_torch(args.name, m, seed)   # retrain weights -> work/models/
         del m
     save_preds(args.name, "test", uid_t, np.mean(test_preds, axis=0))
     print(f"[DONE] {args.name} val_rmsle={score:.6f} "

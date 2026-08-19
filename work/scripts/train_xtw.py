@@ -22,6 +22,7 @@ import common
 import exp_lib
 from common import TEST_ANCHOR, rmsle, load_anchor, feature_cols
 from exp_lib import available_train_anchors, save_preds, log_score
+from model_io import booster_filename, save_meta, save_xgb
 
 ROWS_PER_ANCHOR = 250_000
 
@@ -155,6 +156,13 @@ def main():
     del Xall
     mf = xgb.train(p, dall, num_boost_round=n2)
     del dall
+    # freeze: retrained booster + what inference needs to reuse it
+    save_xgb(args.name, mf)
+    save_meta(args.name, kind="gbdt", model="xgb", objective="log_mse",
+              feature_cols=cols, params=p, n_estimators_retrain=n2,
+              seed=args.seed, gap_days=args.gap_days, m_hat_test=0.0,
+              n_anchors=len(tr_anchors), val_rmsle=float(score),
+              weights=[booster_filename("xgb", args.name)])
 
     test = load_anchor(TEST_ANCHOR)
     Xt = test.select(cols).to_numpy().astype(np.float32)

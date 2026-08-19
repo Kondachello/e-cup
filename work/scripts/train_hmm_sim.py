@@ -46,6 +46,7 @@ from common import (  # noqa: E402
     TEST_ANCHOR, TRAIN_PARQUET, VAL_ANCHOR, WORK, load_anchor, rmsle, user_universe,
 )
 from exp_lib import PREDS_DIR, log_score, save_preds  # noqa: E402
+from model_io import save_meta  # noqa: E402
 
 HORIZON = 30
 N_SYM = 3
@@ -354,6 +355,20 @@ def main():
                       "p_zero": pz}).write_parquet(
             PREDS_DIR / f"{args.name}_aux_test.parquet")
         out.update(test_mean_elog=float(pred.mean()), test_seconds=round(dt))
+
+    if not args.smoke:
+        # freeze: this model has NO fitted weights to store — the per-user HMM is
+        # re-estimated from each user's own history at predict time and never sees
+        # the target. Reproducing it means re-running this script with these
+        # hyper-parameters and seed, so record them instead of a weights file.
+        save_meta(args.name, kind="hmm_sim", stateless=True,
+                  states=args.states, sims=args.sims, win=args.win, k0=args.k0,
+                  em_cap=args.em_cap, seed=args.seed, splits=args.splits,
+                  val_rmsle=out.get("val_rmsle"), weights=[],
+                  reproduce_cmd=f"train_hmm_sim.py --name {args.name} "
+                                f"--states {args.states} --sims {args.sims} "
+                                f"--win {args.win} --em-cap {args.em_cap} "
+                                f"--seed {args.seed} --splits {args.splits}")
 
     print("RESULT_JSON " + json.dumps(out))
 
