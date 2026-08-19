@@ -21,6 +21,7 @@ GROUPS = {
     "twl_v7_avg":  ["twl_v7", "twl_v7_s1337", "twl_v7_s7"],
     "behavonly_avg":["behavonly", "behavonly_s1337", "behavonly_s7"],
     "mlpbin_avg":  ["mlpbin", "mlpbin_b", "mlpbin_c", "mlpbin_d"],
+    "fusion_v3c_avg":["fusion_v3c555", "fusion_v3c42", "fusion_v3c1337", "fusion_v3c7", "fusion_v3c2024"],
     "fusion_v3_fine_avg":["fusion_v3_fine42", "fusion_v3_fine1337", "fusion_v3_fine7",
                         "fusion_v3_fine555", "fusion_v3_fine2024"],
     "fusion_v3_avg":["fusion_v3", "fusion_v3_s1337", "fusion_v3_s7", "fusion_v3_s2024", "fusion_v3_s555"],
