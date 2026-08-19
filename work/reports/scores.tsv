@@ -360,3 +360,15 @@ hz_smoke_mc	1.761449	daily hazard mc: days=120 stride=3 uf=0.12 trees=250 scen=1
 hz_v1_surv	1.705057	daily hazard surv: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00085 после калибровки (корр 0.977), вклад 0.000005 — шум
 hz_v1_pb	1.706225	daily hazard pb: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00083 после калибровки (корр 0.977), вклад 0.000005 — шум
 hz_v1_mc	1.720946	daily hazard mc: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00058 после калибровки (корр 0.970), вклад 0.000002 — шум
+lag0	1.689886	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2026-01-14
+lag14	1.721101	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2025-12-31
+lag28	1.744511	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2025-12-17
+lagmix_a	1.697800	lag-TTA champion tw1.45-on-log gap30 n12 it=57; mix {'lag0': 0.5, 'lag14': 0.5}
+lagmix_b	1.694822	lag-TTA champion tw1.45-on-log gap30 n12 it=57; mix {'lag0': 0.6, 'lag14': 0.25, 'lag28': 0.15}
+lagd0	1.679469	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2026-01-14; ЗАПАС +0.00050 — свежие фичи, в оболочке
+lagd14	1.715825	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-31; ЗАПАС +0.00036 (винтаж 31.12 — новогодний якорь, аномален по Р5)
+lagd28	1.745023	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-17; ЗАПАС +0.00307 (рекорд проекта был 0.00193); честный вклад один +0.000083, с hz_v1_surv +0.000122
+lagd42	1.767829	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-03; ЗАПАС +0.00280; честный вклад один +0.000011; с lagd28 не складывается
+lagd56	1.791567	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-19; ЗАПАС +0.00091; честный вклад -0.000019
+lagd70	1.807626	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-05; ЗАПАС +0.00014 — застоялость исчерпана
+tabpfn_probe	-	пробник остатка бленда TabPFN-2.5: mdl_flint real -0.01159 vs placebo -0.00114 (2 контекста x4000, оценка 4000) — сигнала нет, теорема оболочки подтверждена снаружи зоопарка
