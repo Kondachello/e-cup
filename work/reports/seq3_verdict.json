@@ -1,0 +1,34 @@
+{
+ "models": {
+  "fusion_v3": {
+   "raw": 1.689871,
+   "cal": 1.669879,
+   "mean_logpred": 2.4946,
+   "sd_logpred": 1.6052
+  },
+  "fusion_v3ctl": {
+   "raw": 1.69109,
+   "cal": 1.670161,
+   "mean_logpred": 2.5026,
+   "sd_logpred": 1.5962
+  },
+  "fusion_f": {
+   "raw": 1.685104,
+   "cal": 1.668954,
+   "mean_logpred": 2.4681,
+   "sd_logpred": 1.5967
+  }
+ },
+ "delta_raw": -0.001219,
+ "delta_cal": -0.000282,
+ "delta_cal_ci95": [
+  -0.000517,
+  -4.4e-05
+ ],
+ "corr_cal_with_ctl": 0.99946,
+ "helps": true,
+ "above_noise_floor": false,
+ "verdict": "NOISE (|delta| <= 0.001)",
+ "ref_fusion_f_cal": 1.668954,
+ "note_ref": "fusion_f is seq2 L=196 with 12 final anchors — context only, not the control"
+}

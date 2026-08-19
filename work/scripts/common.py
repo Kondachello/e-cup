@@ -50,6 +50,18 @@ V10_DROP = {"v10_s2o_90", "v10_c2o_90"}
 V10_FEATS = [f for f in ([f"v10_{b}_{w}" for w in V10_WINDOWS for b in V10_PER_WIN]
                          + [f"v10_tr_{b}" for b in V10_TRENDS]) if f not in V10_DROP]
 
+# v5 tier = joint low-rank factors of the user x week matrices (build_features_v5.py).
+# One frozen basis for every anchor, so factor j means the same thing at every anchor.
+# USE_V5=N takes the first N components (they are ordered by singular value); N <= 48.
+V5_MAX_COMPS = 48
+
+
+def v5_cols(n: int = V5_MAX_COMPS) -> list[str]:
+    return [f"v5_j{j:02d}" for j in range(n)]
+
+
+V5_FEATS = v5_cols()
+
 
 def train_anchors(n: int = 14, stride: int = 14) -> list[date]:
     """Training anchors strictly before VAL_ANCHOR, newest first in time order."""
@@ -85,6 +97,7 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     v7 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v7.parquet"
     v8 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v8.parquet"
     v10 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v10.parquet"
+    v5 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v5.parquet"
     seqoof = FEATURES_DIR / f"anchor={anchor.isoformat()}.seqoof.parquet"
     use2 = extra.exists() and os.environ.get("USE_V2")
     use3 = v3.exists() and os.environ.get("USE_V3")
@@ -93,8 +106,12 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     use7 = os.environ.get("USE_V7")
     use8 = os.environ.get("USE_V8")
     use10 = os.environ.get("USE_V10")
+    use5 = os.environ.get("USE_V5")
+    use5s = os.environ.get("USE_V5S")
+    use5cap = os.environ.get("USE_V5CAP")
     useoof = os.environ.get("USE_SEQOOF")
-    if not (use2 or use3 or use4 or use6 or use7 or use8 or use10 or useoof):
+    if not (use2 or use3 or use4 or use6 or use7 or use8 or use10 or use5
+            or use5s or use5cap or useoof):
         return pl.read_parquet(p, columns=columns)
     df = pl.read_parquet(p)
     if use2:
@@ -126,6 +143,32 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
         else:
             df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
                                   for c in V10_FEATS])
+    if use5:
+        # v5 = joint low-rank weekly factors; USE_V5=N keeps the first N components
+        want = v5_cols(max(1, min(int(use5), V5_MAX_COMPS)))
+        if v5.exists():
+            df = df.join(pl.read_parquet(v5, columns=["user_id"] + want),
+                         on="user_id", how="left")
+        else:
+            df = df.with_columns([pl.lit(None, dtype=pl.Int16).alias(c) for c in want])
+    if use5s:
+        # v5s = 2 SUPERVISED weekly columns from train_wklin.py --emit-tier (leave-one-anchor-out).
+        # The concentrated form of the weekly signal: the booster cannot mine 180 weak linear
+        # columns, but it can use two strong ones.
+        v5s = FEATURES_DIR / f"anchor={anchor.isoformat()}.v5s.parquet"
+        if v5s.exists():
+            df = df.join(pl.read_parquet(v5s), on="user_id", how="left")
+        else:
+            df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
+                                  for c in ("v5s_lin", "v5s_orth")])
+    if use5cap:
+        # Equal-capacity control for v5: USE_V5CAP=N adds N columns that carry NO new
+        # information -- a fixed random orthogonal mixture of within-anchor percentile
+        # ranks of N existing features. Same count, same dense-continuous character, same
+        # extra parameters for the booster to spend, zero extra information. This is the
+        # control the v6/v8/v10 post-mortems demand ("compare against equal capacity, not
+        # against fewer features"). Built on the fly: it costs no disk.
+        df = add_capacity_control(df, int(use5cap))
     if useoof:
         if seqoof.exists():
             df = df.join(pl.read_parquet(seqoof), on="user_id", how="left")
@@ -133,6 +176,22 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
             # keep schema consistent: anchors without OOF coverage get nulls
             df = df.with_columns(pl.lit(None, dtype=pl.Float32).alias("seqoof_pred"))
     return df.select(columns) if columns else df
+
+
+def add_capacity_control(df: pl.DataFrame, n: int) -> pl.DataFrame:
+    """N columns of pure capacity: rotate percentile ranks of N existing features."""
+    src = sorted(c for c in df.columns
+                 if c not in ("user_id", "anchor_date", "target") and not c.startswith("v5cap_"))
+    src = src[:n]
+    R = np.linalg.qr(np.random.default_rng(20260819).normal(size=(len(src), n)))[0]
+    A = np.empty((df.height, len(src)), dtype=np.float64)
+    for j, c in enumerate(src):
+        v = df[c].to_numpy().astype(np.float64)
+        v = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+        A[:, j] = np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
+    M = A @ R
+    return df.with_columns([pl.Series(f"v5cap_{j:02d}", M[:, j].astype(np.float32))
+                            for j in range(n)])
 
 
 def feature_cols(df: pl.DataFrame) -> list[str]:

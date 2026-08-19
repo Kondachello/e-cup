@@ -185,3 +185,172 @@ twl_aall	1.689797	число срезов 23 из 23 доступных чист
 febspec2	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
 febspec2_cal	1.770665	binned log-shift calibration of febspec2; holdout 1.782185->1.768060
 mlpbin_big	1.677559	WIDTH arm: 1024,512,256 vs mlpbin 512,256 (all else identical). Smoke paired d_cal=-0.00107+-0.00037 over 9 runs; holdout raw=1.677834 cal=1.669343
+mlpbin_big2	1.677677	WIDTH+DROPOUT arm: 2048,1024,512 do0.25. Smoke paired d_cal=-0.00089 (width) and -0.00015 (dropout at this width); holdout raw=1.678037 cal=1.669561
+blend_opt	1.666648	re-optimised blend: lib=B_plus_cal(77) method=ridge_free alpha_rel=0.0003; OOF(5f by user)=1.666728; current mix val 1.667432; w={'fusion_avg_cal': 0.1798, 'fusion_f_cal': 0.1538, 'c_ts2_s42_cal': 0.1183, 'c_ts2_avg_cal': 0.1126, 'mlpziln_avg_cal': 0.0776, 'behavonly_cal': 0.075, 'countaov_cal': 0.0654, 'seq2tr_f_cal': 0.0595, 'twl_v7_cal': 0.0586, 'mlpziln_cal': 0.0516, 'febspec2_cal': 0.0177, 'hmmsim': 0.0126, 'channel2_cal': 0.0114, 'hmmsim_cal': 0.0085}
+mlpziln_big	1.674786	WIDTH arm for the ZILN family: 1024,512,256 vs mlpziln 512,256
+mlpziln_big_cal	1.669114	binned log-shift calibration of mlpziln_big; holdout 1.675156->1.669646
+mlpbin_big3	1.674477	NORM arm: drop LayerNorm at width 1024,512,256 (isolates norm on top of mlpbin_big). Strongest smoke axis: paired d_cal=-0.00127+-0.00022, while RAW says +0.0030 worse; holdout raw=1.674755 cal=1.669940
+mlpbin_big3_cal	1.669527	binned log-shift calibration of mlpbin_big3; holdout 1.674755->1.669940
+mlpbin_big_cal	1.668906	binned log-shift calibration of mlpbin_big; holdout 1.677834->1.669343
+mlpbin_bigsched	1.677146	SCHEDULE arm: warmup 5% + per-step cosine annealed over a 10-epoch budget (current recipe: T_max=40 epochs but early stop at ep 1-7, so the LR never anneals). Not measurable in a 200-step smoke; holdout raw=1.677389 cal=1.669760
+mlpbin_big_cal	1.668906	binned log-shift calibration of mlpbin_big; holdout 1.677834->1.669343
+mlpbin_big2_cal	1.669078	binned log-shift calibration of mlpbin_big2; holdout 1.678037->1.669561
+mlpziln_big_cal	1.669114	binned log-shift calibration of mlpziln_big; holdout 1.675156->1.669646
+mlpbin_big3_cal	1.669527	binned log-shift calibration of mlpbin_big3; holdout 1.674755->1.669940
+mlpbin_bigsched_cal	1.669232	binned log-shift calibration of mlpbin_bigsched; holdout 1.677389->1.669760
+febspec3_mlp	1.810473	Feb2025 specialist v3: mlp2 on 4 anchors 2025-02-06..2025-02-27 (stop on 2025-01-30), short<=42d tier 153 feats funnel=True, cohort 100%, seeds=42,1337
+febspec3_mlp_cal	1.774166	binned log-shift calibration of febspec3_mlp; holdout 1.807269->1.771661
+febspec3_tw	1.795224	Feb2025 specialist v3: lgb_tw145_nofun on 4 anchors 2025-02-06..2025-02-27 (stop on 2025-01-30), short<=42d tier 93 feats funnel=False, cohort 100%, seeds=42
+febspec3_tw_cal	1.771914	binned log-shift calibration of febspec3_tw; holdout 1.792133->1.769461
+febspec3_avg_cal	1.771682	binned log-shift calibration of febspec3_avg; holdout 1.769042->1.769213
+countaov_s1337	1.693615	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n14 damp=1.0; cnt_rmsle=0.6157 aov_rmse=1.1641 aov_bias=-0.5257 it=57/174; best_damp=0.85 (holdout 1.6942->1.6758); direct_champ=1.6927 d=+0.0009
+countaov_s1337_dampfit	1.675147	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.694181->1.675801
+countaov_s7	1.693744	cnt*check uplift; tw1.3-on-log1p(cnt) + tw1.3 uplift nl255 mdl300 lr0.05 gap30 n14 damp=1.0; cnt_rmsle=0.6157 aov_rmse=1.1640 aov_bias=-0.5246 it=154/181; best_damp=0.85 (holdout 1.6943->1.6758); direct_champ=1.6927 d=+0.0010
+countaov_s7_dampfit	1.675158	check damp 0.85 fitted on half VAL (grid 0.85..1.05); honest holdout 1.694296->1.675776
+channel_s1337	1.688284	2ch sum-expm1; tw1.45-on-log S:nl255-mdl300 C:nl255-mdl300 gap30 n14; search=1.6807 cat=0.8670 it=260/233; direct_champ=1.6927 d=-0.0044
+channel_s1337_chcal	1.671064	per-channel binned log-shift (fit half VAL, bins=24) + Jensen k=1.06; honest holdout 1.688733->1.671584; ch_holdout s=1.6563 c=0.8614
+c_ts2_s7_cal	1.668406	binned log-shift calibration of c_ts2_s7; holdout 1.692610->1.668853
+c_ts2_s2024_cal	1.668377	binned log-shift calibration of c_ts2_s2024; holdout 1.692487->1.669035
+c_ts2_s555_cal	1.668446	binned log-shift calibration of c_ts2_s555; holdout 1.692511->1.668817
+mlpziln_b_cal	1.668397	binned log-shift calibration of mlpziln_b; holdout 1.676408->1.668820
+mlpziln_c_cal	1.669071	binned log-shift calibration of mlpziln_c; holdout 1.675968->1.669463
+countaov_s1337_cal	1.669117	binned log-shift calibration of countaov_s1337; holdout 1.694181->1.669791
+countaov_s7_cal	1.668900	binned log-shift calibration of countaov_s7; holdout 1.694296->1.669636
+channel_s1337_cal	1.671214	binned log-shift calibration of channel_s1337; holdout 1.688733->1.671780
+twl_v7_s1337	1.693765	дополнительный сид для усреднения: единственный надёжный источник улучшения при насыщенном ансамбле
+twl_v7_s7	1.694413	дополнительный сид для усреднения: единственный надёжный источник улучшения при насыщенном ансамбле
+behavonly_s1337	1.711118	дополнительный сид для усреднения: единственный надёжный источник улучшения при насыщенном ансамбле
+behavonly_s7	1.710653	дополнительный сид для усреднения: единственный надёжный источник улучшения при насыщенном ансамбле
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+c_ts2_avg_cal	1.668111	binned log-shift calibration of c_ts2_avg; holdout 1.692766->1.668629
+mlpziln_avg_cal	1.668387	binned log-shift calibration of mlpziln_avg; holdout 1.676375->1.668823
+countaov_avg_cal	1.668713	binned log-shift calibration of countaov_avg; holdout 1.693691->1.669437
+fusion_avg_cal	1.668255	binned log-shift calibration of fusion_avg; holdout 1.692988->1.668527
+channel_avg_cal	1.670651	binned log-shift calibration of channel_avg; holdout 1.687512->1.671102
+twl_v7_avg_cal	1.669278	binned log-shift calibration of twl_v7_avg; holdout 1.694021->1.669984
+behavonly_avg_cal	1.685563	binned log-shift calibration of behavonly_avg; holdout 1.710564->1.685422
+blend_opt	1.666599	re-optimised blend: lib=B_plus_cal(116) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666704; current mix val 1.667432; w={'fusion_avg_cal': 0.2029, 'fusion_f_cal': 0.1422, 'c_ts2_s7_cal': 0.1192, 'c_ts2_s42_cal': 0.0972, 'mlpziln_b_cal': 0.0908, 'behavonly_avg_cal': 0.0817, 'seq2tr_f_cal': 0.0562, 'countaov_s7_cal': 0.0451, 'twl_v7_cal': 0.0394, 'countaov_cal': 0.0282, 'c_ts2_s2024_cal': 0.028, 'febspec2_cal': 0.0157, 'mlpziln_cal': 0.0135, 'countaov_avg_cal': 0.0114, 'hmmsim': 0.0109, 'hmmsim_cal': 0.0098, 'c_ts2_s555_cal': 0.0061, 'twl_v7_avg_cal': 0.0041}
+fusion_v3	1.689871	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=42 best_steps=[1968] per_seed=[1.68987] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3ctl (--n-ch 8), compare only after calibration
+wklin	1.684188	ridge on 180 anchor-relative weekly log columns (act/cart/ord/srch/gmv x 36 weeks) + 203 base features in signed log; alpha on held-out anchor; 14 anchors gap30
+wklin_wk	1.731511	ridge on 180 anchor-relative weekly log columns (act/cart/ord/srch/gmv x 36 weeks) + 203 base features in signed log; alpha on held-out anchor; 14 anchors gap30
+wklin_base	1.686242	ridge on 180 anchor-relative weekly log columns (act/cart/ord/srch/gmv x 36 weeks) + 203 base features in signed log; alpha on held-out anchor; 14 anchors gap30
+wklin_cal	1.672810	binned log-shift calibration of wklin; holdout 1.684750->1.673306
+wklin_wk_cal	1.698418	binned log-shift calibration of wklin_wk; holdout 1.730281->1.697660
+wklin_base_cal	1.675416	binned log-shift calibration of wklin_base; holdout 1.687089->1.676226
+blend_opt	1.666521	re-optimised blend: lib=B_plus_cal(123) method=ridge_free alpha_rel=1e-05; OOF(5f by user)=1.666626; current mix val 1.667432; w={'fusion_avg_cal': 0.2643, 'c_ts2_s7_cal': 0.1328, 'fusion_f_cal': 0.1001, 'c_ts2_s42_cal': 0.0973, 'behavonly_avg_cal': 0.0822, 'wklin': 0.0792, 'mlpziln_b_cal': 0.0614, 'countaov_s7_cal': 0.0479, 'seq2tr_f_cal': 0.0402, 'twl_v7_cal': 0.0281, 'hmmsim_cal': 0.0252, 'febspec2_cal': 0.015, 'c_xtw_s42': 0.0145, 'wklin_wk': 0.0137, 'countaov_cal': 0.0033}
+fusion_v3ctl	1.691090	fusion3 seq3 L112 ch8 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=42 best_steps=[1968] per_seed=[1.69109] STRICT CONTROL for fusion_v3: same seq3 tensors/anchors/seed/L=112/quantisation, first 8 channels only (= seq2 channel set) -> isolates the funnel channels from the L=112-vs-196 change
+mlpbin_b	1.680363	дополнительный сид для усреднения; holdout raw=1.680638 cal=1.669806
+mlpbin_c	1.676665	дополнительный сид для усреднения; holdout raw=1.676811 cal=1.670202
+fusion_v3_cal	1.669755	binned log-shift calibration of fusion_v3; holdout 1.690279->1.670348
+mlpziln_d	1.681349	дополнительный сид для усреднения
+mlpbin_d	1.679595	дополнительный сид для усреднения; holdout raw=1.679812 cal=1.670405
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+mlpbin_avg_cal	1.668812	binned log-shift calibration of mlpbin_avg; holdout 1.677407->1.669235
+mlpziln_avg_cal	1.668387	binned log-shift calibration of mlpziln_avg; holdout 1.676375->1.668823
+blend_opt	1.666447	re-optimised blend: lib=B_plus_cal(131) method=nnls_free alpha_rel=0.0; OOF(5f by user)=1.666557; current mix val 1.667432; w={'fusion_v3_cal': 0.2284, 'fusion_avg_cal': 0.1463, 'c_ts2_s7_cal': 0.1171, 'c_ts2_s42_cal': 0.1054, 'behavonly_avg_cal': 0.0959, 'wklin': 0.0817, 'seq2tr_f_cal': 0.0462, 'countaov_s7_cal': 0.0412, 'mlpziln_b_cal': 0.0401, 'twl_v7_cal': 0.0246, 'hmmsim_cal': 0.022, 'wklin_wk': 0.018, 'febspec2_cal': 0.017, 'countaov_cal': 0.0098, 'c_xtw_s42': 0.0094, 'hmmsim': 0.0028}
+fusion_v3_s1337	1.679612	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=1337 best_steps=[984] per_seed=[1.67961] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3_s1337ctl (--n-ch 8), compare only after calibration
+fusion_v3_s7	1.694373	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=7 best_steps=[984] per_seed=[1.69437] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3_s7ctl (--n-ch 8), compare only after calibration
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3_avg	1.685126	seed-avg of 3: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7']; лучший одиночный 1.679612
+fusion_v3_avg_cal	1.668553	binned log-shift calibration of fusion_v3_avg; holdout 1.685550->1.669012
+blend_opt	1.666447	re-optimised blend: lib=B_plus_cal(135) method=nnls_free alpha_rel=0.0; OOF(5f by user)=1.666557; current mix val 1.667432; w={'fusion_v3_cal': 0.2284, 'fusion_avg_cal': 0.1463, 'c_ts2_s7_cal': 0.1171, 'c_ts2_s42_cal': 0.1054, 'behavonly_avg_cal': 0.0959, 'wklin': 0.0817, 'seq2tr_f_cal': 0.0462, 'countaov_s7_cal': 0.0412, 'mlpziln_b_cal': 0.0401, 'twl_v7_cal': 0.0246, 'hmmsim_cal': 0.022, 'wklin_wk': 0.018, 'febspec2_cal': 0.017, 'countaov_cal': 0.0098, 'c_xtw_s42': 0.0094, 'hmmsim': 0.0028}
+fusion_v3_cal	1.669755	binned log-shift calibration of fusion_v3; holdout 1.690279->1.670348
+fusion_v3ctl_cal	1.670016	binned log-shift calibration of fusion_v3ctl; holdout 1.691537->1.670647
+weak_rs_a	1.698716	weak/subspace frac=0.15 sel_seed=101; 30 feats
+weak_rs_a_cal	1.679170	binned log-shift calibration of weak_rs_a; holdout 1.699203->1.679753
+weak_rs_b	1.706730	weak/subspace frac=0.2 sel_seed=202; 41 feats
+weak_rs_b_cal	1.679418	binned log-shift calibration of weak_rs_b; holdout 1.707249->1.679841
+weak_rs_c	1.697660	weak/subspace frac=0.25 sel_seed=303; 51 feats
+weak_rs_c_cal	1.675551	binned log-shift calibration of weak_rs_c; holdout 1.698427->1.676347
+weak_rs_d	1.690279	weak/subspace frac=0.18 sel_seed=404; 37 feats
+blend_opt	1.666419	re-optimised blend: lib=B_plus_cal(142) method=ridge_free alpha_rel=1e-05; OOF(5f by user)=1.666535; current mix val 1.667432; w={'fusion_v3ctl_cal': 0.1944, 'c_ts2_s7_cal': 0.1139, 'c_ts2_s42_cal': 0.1011, 'behavonly_avg_cal': 0.0993, 'fusion_avg_cal': 0.0957, 'wklin': 0.083, 'fusion_v3_cal': 0.0753, 'mlpziln_b_cal': 0.0489, 'seq2tr_f_cal': 0.0486, 'countaov_s7_cal': 0.0399, 'twl_v7_cal': 0.0219, 'hmmsim_cal': 0.02, 'wklin_wk': 0.0191, 'febspec2_cal': 0.0174, 'countaov_cal': 0.0123, 'c_xtw_s42': 0.0089, 'hmmsim': 0.0034, 'wklin_wk_cal': 0.0026}
+weak_rs_d_cal	1.673879	binned log-shift calibration of weak_rs_d; holdout 1.690787->1.674518
+weak_an_a	1.690652	weak/anchors k=2 sel_seed=11; 203 feats
+weak_an_a_cal	1.673313	binned log-shift calibration of weak_an_a; holdout 1.691183->1.673919
+weak_an_b	1.690294	weak/anchors k=3 sel_seed=22; 203 feats
+weak_an_b_cal	1.672181	binned log-shift calibration of weak_an_b; holdout 1.690976->1.672876
+weak_an_c	1.696565	weak/anchors k=4 sel_seed=33; 203 feats
+weak_an_c_cal	1.672741	binned log-shift calibration of weak_an_c; holdout 1.697317->1.673315
+blend_opt	1.666419	re-optimised blend: lib=B_plus_cal(146) method=ridge_free alpha_rel=1e-05; OOF(5f by user)=1.666535; current mix val 1.667432; w={'fusion_v3ctl_cal': 0.1944, 'c_ts2_s7_cal': 0.1139, 'c_ts2_s42_cal': 0.1011, 'behavonly_avg_cal': 0.0993, 'fusion_avg_cal': 0.0957, 'wklin': 0.083, 'fusion_v3_cal': 0.0753, 'mlpziln_b_cal': 0.0489, 'seq2tr_f_cal': 0.0486, 'countaov_s7_cal': 0.0399, 'twl_v7_cal': 0.0219, 'hmmsim_cal': 0.02, 'wklin_wk': 0.0191, 'febspec2_cal': 0.0174, 'countaov_cal': 0.0123, 'c_xtw_s42': 0.0089, 'hmmsim': 0.0034, 'wklin_wk_cal': 0.0026}
+weak_ft_short14	1.788392	weak/ftype ftype=short14; 26 feats
+weak_ft_short14_cal	1.776373	binned log-shift calibration of weak_ft_short14; holdout 1.786746->1.775140
+weak_ft_long90	1.716552	weak/ftype ftype=long90; 105 feats
+weak_ft_long90_cal	1.687572	binned log-shift calibration of weak_ft_long90; holdout 1.718261->1.689320
+weak_ft_recency	1.729126	weak/ftype ftype=recency; 21 feats
+weak_ft_recency_cal	1.697701	binned log-shift calibration of weak_ft_recency; holdout 1.729618->1.698277
+weak_ft_counts	1.702208	weak/ftype ftype=counts; 88 feats
+weak_ft_counts_cal	1.681718	binned log-shift calibration of weak_ft_counts; holdout 1.702658->1.682352
+weak_an_d	1.683269	weak/anchors k=4 sel_seed=77; 203 feats
+weak_an_d_cal	1.670760	binned log-shift calibration of weak_an_d; holdout 1.683619->1.671279
+weak_tiny_a	1.696889	weak/tiny; 203 feats
+weak_tiny_a_cal	1.670602	binned log-shift calibration of weak_tiny_a; holdout 1.697183->1.671138
+weak_tiny_b	1.696522	weak/tiny; 203 feats
+weak_tiny_b_cal	1.670216	binned log-shift calibration of weak_tiny_b; holdout 1.696822->1.670730
+weak_tiny_c	1.697800	weak/tiny; 203 feats
+weak_tiny_c_cal	1.671163	binned log-shift calibration of weak_tiny_c; holdout 1.698052->1.671622
+weak_tiny_d	1.693486	weak/tiny; 203 feats
+weak_tiny_d_cal	1.670040	binned log-shift calibration of weak_tiny_d; holdout 1.693695->1.670318
+twl_v5	1.693532	champion tweedie + v5 joint weekly factors (32 comps), identical to twl_v5ctl except USE_V5
+twl_v5_cal	1.669221	binned log-shift calibration of twl_v5; holdout 1.693701->1.669550
+twl_v5ctl	1.693684	CONTROL for twl_v5: identical cfg/seed/anchors, v2/v3/v4 WITHOUT the v5 tier
+twl_v5cap	1.693456	CAPACITY control for twl_v5: 32 rotated rank-columns of existing features, no new information
+twl_v5s	1.692635	champion tweedie + v5s: 2 supervised weekly columns (leave-one-anchor-out ridge)
+twl_v5s_cal	1.671010	binned log-shift calibration of twl_v5s; holdout 1.693310->1.671691
+fusion_v3_s2024	1.678275	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=2024 best_steps=[984] per_seed=[1.67827] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3_s1337ctl (--n-ch 8), compare only after calibration
+fusion_v3_s555	1.687732	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=555 best_steps=[984] per_seed=[1.68773] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3_s1337ctl (--n-ch 8), compare only after calibration
+fusion_v3ctl_s1337	1.679612	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=1337 best_steps=[984] per_seed=[1.67961] seq3 12ch (adds search_to_cart/search_to_ord/cat_to_cart/cat_to_ord per day); 8 clean gap30 anchors 2025-10-22..12-10, L=112 uint8; paired with fusion_v3_s1337ctl (--n-ch 8), compare only after calibration
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+fusion_v3_avg_cal	1.668594	binned log-shift calibration of fusion_v3_avg; holdout 1.681880->1.669015
+blend_opt	1.666395	re-optimised blend: lib=B_plus_cal(175) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666519; current mix val 1.667432; w={'fusion_v3ctl_cal': 0.1695, 'fusion_v3_cal': 0.109, 'c_ts2_s7_cal': 0.1038, 'fusion_avg_cal': 0.0878, 'c_ts2_s42_cal': 0.0845, 'wklin': 0.0768, 'behavonly_avg_cal': 0.0578, 'weak_an_d_cal': 0.0564, 'seq2tr_f_cal': 0.0471, 'mlpziln_b_cal': 0.0446, 'countaov_s7_cal': 0.029, 'weak_ft_recency_cal': 0.0272, 'weak_ft_counts_cal': 0.0223, 'wklin_wk': 0.0192, 'hmmsim_cal': 0.0192, 'twl_v7_cal': 0.017, 'febspec2_cal': 0.0154, 'c_xtw_s42': 0.006, 'hmmsim': 0.0055, 'mlpbin_bigsched_cal': 0.0035, 'wklin_wk_cal': 0.0024, 'weak_ft_long90_cal': 0.0018}
+fusion_v3_fine42	1.681223	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=42 best_steps=[492] per_seed=[1.68122] частая оценка 246 вместо 984: 12 точек выбора остановки вместо 3, разброс между сидами был 1.678-1.694
+fusion_v3_fine1337	1.679612	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=1337 best_steps=[984] per_seed=[1.67961] частая оценка 246 вместо 984: 12 точек выбора остановки вместо 3, разброс между сидами был 1.678-1.694
+fusion_v3_fine7	1.688906	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=7 best_steps=[492] per_seed=[1.68891] частая оценка: спасает сиды, где грубая сетка промахивается мимо оптимума (сид 42: шаг 1968 -> 492, скор 1.689871 -> 1.681223)
+fusion_v3_fine555	1.677108	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=555 best_steps=[738] per_seed=[1.67711] частая оценка: спасает сиды, где грубая сетка промахивается мимо оптимума (сид 42: шаг 1968 -> 492, скор 1.689871 -> 1.681223)
+fusion_v3_fine2024	1.678275	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 seeds=2024 best_steps=[984] per_seed=[1.67827] частая оценка: спасает сиды, где грубая сетка промахивается мимо оптимума (сид 42: шаг 1968 -> 492, скор 1.689871 -> 1.681223)
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+fusion_v3_fine_avg_cal	1.669033	binned log-shift calibration of fusion_v3_fine_avg; holdout 1.677578->1.669596
+blend_opt	1.666395	re-optimised blend: lib=B_plus_cal(182) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666519; current mix val 1.667432; w={'fusion_v3ctl_cal': 0.1695, 'fusion_v3_cal': 0.109, 'c_ts2_s7_cal': 0.1038, 'fusion_avg_cal': 0.0878, 'c_ts2_s42_cal': 0.0845, 'wklin': 0.0768, 'behavonly_avg_cal': 0.0578, 'weak_an_d_cal': 0.0564, 'seq2tr_f_cal': 0.0471, 'mlpziln_b_cal': 0.0446, 'countaov_s7_cal': 0.029, 'weak_ft_recency_cal': 0.0272, 'weak_ft_counts_cal': 0.0223, 'wklin_wk': 0.0192, 'hmmsim_cal': 0.0192, 'twl_v7_cal': 0.017, 'febspec2_cal': 0.0154, 'c_xtw_s42': 0.006, 'hmmsim': 0.0055, 'mlpbin_bigsched_cal': 0.0035, 'wklin_wk_cal': 0.0024, 'weak_ft_long90_cal': 0.0018}
+fusion_v3_rb555	1.677108	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=raw seeds=555 best_steps=[738] per_seed=[1.67711] длина переобучения масштабируется от найденной точки остановки (множитель 1.0875 по числу срезов), а не фиксированные 3321 шаг; замерено, что доучивание до конца стоит в среднем +0.0121 на валидации
+fusion_v3_rb2024	1.678275	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=raw seeds=2024 best_steps=[984] per_seed=[1.67827] длина переобучения масштабируется от найденной точки остановки (множитель 1.0875 по числу срезов), а не фиксированные 3321 шаг; замерено, что доучивание до конца стоит в среднем +0.0121 на валидации
+fusion_v3_rb1337	1.679612	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=raw seeds=1337 best_steps=[984] per_seed=[1.67961] длина переобучения масштабируется от найденной точки остановки (множитель 1.0875 по числу срезов), а не фиксированные 3321 шаг; замерено, что доучивание до конца стоит в среднем +0.0121 на валидации
+fusion_v3_escal555	1.696810	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=555 best_steps=[2706] per_seed=[1.69681] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine555 с тем же сидом и сеткой оценки, но по сырому
+fusion_v3_escal42	1.698175	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=42 best_steps=[1476] per_seed=[1.69817] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine42 с тем же сидом и сеткой оценки, но по сырому
+fusion_v3_escal7	1.685776	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=7 best_steps=[2706] per_seed=[1.68578] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine7 с тем же сидом и сеткой оценки, но по сырому
+fusion_v3_e6_555	1.684636	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 eval_every=492 es=cal seeds=555 best_steps=[2460] per_seed=[1.68464] калиброванный критерий остановки + 6 эпох: калиброванный скор на 3 эпохах до конца бюджета не вышел на плато (1.66868 на шаге 2706 и всё ещё падал)

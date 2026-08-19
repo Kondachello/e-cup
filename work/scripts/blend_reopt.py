@@ -183,7 +183,15 @@ def main():
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--boot", type=int, default=50)
     ap.add_argument("--lib", default="B_plus_cal")
+    ap.add_argument("--exclude", default="",
+                    help="доп. подстроки (через запятую) для исключения из библиотеки — "
+                         "нужно для ЧЕСТНОГО парного замера «до/после» добавления семейства "
+                         "моделей: обе прогонки делаются в один момент на одном пуле")
+    ap.add_argument("--json", default="blend_reopt.json", help="имя файла отчёта в work/reports")
     args = ap.parse_args()
+    global EXCL_SUBSTR
+    if args.exclude:
+        EXCL_SUBSTR = EXCL_SUBSTR + tuple(s for s in args.exclude.split(",") if s)
 
     t0 = time.time()
     val = load_anchor(VAL_ANCHOR, columns=["user_id", "target"]).sort("user_id")
@@ -471,8 +479,8 @@ def main():
         "levels": lev,
         "runtime_s": round(time.time() - t0, 1),
     }
-    (REPORTS_DIR / "blend_reopt.json").write_text(json.dumps(out, indent=1))
-    print("\nJSON written to work/reports/blend_reopt.json "
+    (REPORTS_DIR / args.json).write_text(json.dumps(out, indent=1))
+    print(f"\nJSON written to work/reports/{args.json} "
           f"({time.time() - t0:.0f}s)")
     return out
 
