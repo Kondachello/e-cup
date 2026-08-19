@@ -1,0 +1,36 @@
+{
+ "models": {
+  "twl_a14": {
+   "raw": 1.693684,
+   "cal": 1.669444,
+   "mean_logpred": 2.5103,
+   "sd_logpred": 1.6309
+  },
+  "twl_a20": {
+   "raw": 1.690114,
+   "cal": 1.669254,
+   "mean_logpred": 2.495,
+   "sd_logpred": 1.6185
+  },
+  "twl_aall": {
+   "raw": 1.689797,
+   "cal": 1.67156,
+   "mean_logpred": 2.4766,
+   "sd_logpred": 1.5332
+  }
+ },
+ "base": "twl_a14",
+ "deltas_vs_base": {
+  "twl_a20": {
+   "delta_raw": -0.00357,
+   "delta_cal": -0.00019
+  },
+  "twl_aall": {
+   "delta_raw": -0.003887,
+   "delta_cal": 0.002116
+  }
+ },
+ "best_by_cal": "twl_a20",
+ "above_noise_floor": false,
+ "verdict": "ШУМ (|дельта| <= 0.001), нужен второй сид"
+}
