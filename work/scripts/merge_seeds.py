@@ -20,6 +20,7 @@ GROUPS = {
     "channel_avg": ["channel2", "channel_s1337"],
     "twl_v7_avg":  ["twl_v7", "twl_v7_s1337", "twl_v7_s7"],
     "behavonly_avg":["behavonly", "behavonly_s1337", "behavonly_s7"],
+    "mlpziln_c9_avg":["mlpziln_ca", "mlpziln_cb", "mlpziln_cc"],
     "mlpziln_cal_avg":["mlpziln_c42", "mlpziln_c1337", "mlpziln_c7"],
     "mlpbin_avg":  ["mlpbin", "mlpbin_b", "mlpbin_c", "mlpbin_d"],
     "fusion_v3c_avg":["fusion_v3c555", "fusion_v3c42", "fusion_v3c1337", "fusion_v3c7", "fusion_v3c2024"],
