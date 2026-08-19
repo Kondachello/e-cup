@@ -206,7 +206,8 @@ def main():
     ap.add_argument("--w-power", type=str, default="1.0",
                     help="w = v^-POWER; 1.0 = textbook GLS, 0.5 = damped, negative = mirror "
                          "(upweight the uncertain rows). Comma list sweeps several arms; "
-                         "stages 1-2 are shared so each extra arm costs only one fit.")
+                         "stages 1-2 are shared so each extra arm costs only one fit. "
+                         "A list starting with '-' needs the equals form: --w-power=-0.5,-1.0")
     ap.add_argument("--cf-cap-iter", type=int, default=0,
                     help="cap cross-fit trees (smoke: keep = --params n_estimators)")
     ap.add_argument("--seed", type=int, default=42)
@@ -313,7 +314,8 @@ def main():
         hraw_b, hcal_b = cal_holdout(lp_base, yv_log, yv_raw, half)
         res["base"] = dict(raw=raw_b, holdout_raw=hraw_b, holdout_cal=hcal_b,
                            iters=int(it_base), secs=round(time.time() - t4))
-        res["delta"] = dict(raw=raw_gls - raw_b, holdout_raw=hraw_gls - hraw_b,
+        res["delta"] = dict(raw=raw_gls - raw_b,  # primary arm vs the unweighted control
+                            holdout_raw=res["gls"]["holdout_raw"] - hraw_b,
                             cal=hcal_gls - hcal_b,
                             err_corr=float(np.corrcoef(lp_gls - yv_log, lp_base - yv_log)[0, 1]))
         print(f"[base] raw={raw_b:.6f} holdout raw={hraw_b:.6f} cal={hcal_b:.6f} it={it_base}",
