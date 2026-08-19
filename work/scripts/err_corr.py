@@ -77,10 +77,18 @@ def main():
         d = e - eb
         w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))
         best = float(np.sqrt(np.mean(((1 - w) * lb + w * lp - ly) ** 2)))
+        # Корреляция ошибок сама по себе НИЧЕГО не значит: для любой модели внутри
+        # линейной оболочки бленда она тождественно равна sb/sm (остаток бленда
+        # ортогонален оболочке). Работает только ЗАПАС — доля модели вне оболочки.
+        sm = float(np.sqrt(np.mean(e ** 2)))
+        margin = blend_rmsle / max(sm, 1e-12) - c
         out["models"][name] = {"val_rmsle": rmsle(y, np.expm1(lp)), "err_corr": c,
+                               "corr_expected": blend_rmsle / max(sm, 1e-12),
+                               "margin": margin,
                                "w_opt": w, "blend_rmsle": best,
                                "gain": blend_rmsle - best}
-        print(f"{name}: val_rmsle={rmsle(y, np.expm1(lp)):.6f}  err_corr={c:.4f}  "
+        print(f"{name}: val_rmsle={rmsle(y, np.expm1(lp)):.6f}  err_corr={c:.4f} "
+              f"(тождество {blend_rmsle / max(sm, 1e-12):.4f}, ЗАПАС {margin:+.5f})  "
               f"w*={w:.3f} -> {best:.6f} (gain {blend_rmsle - best:+.6f})",
               flush=True)
     if args.json:
