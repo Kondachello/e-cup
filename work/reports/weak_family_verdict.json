@@ -1,0 +1,125 @@
+{
+ "n_models": 16,
+ "mechanisms": [
+  "random feature subspace",
+  "random anchor subset",
+  "feature-type restriction",
+  "tiny over-regularised"
+ ],
+ "min_corr_with_nearest": 0.9632,
+ "median_corr_with_nearest": 0.9968,
+ "n_below_097": 1,
+ "ref_febspec_corr": 0.9691,
+ "blend_oof_before": 1.666535,
+ "blend_oof_after": 1.666518,
+ "family_gain": 1.7e-05,
+ "blend_oof_before_signfree": 1.6661556095458117,
+ "blend_oof_after_signfree": 1.6660650223394413,
+ "family_gain_signfree": 9.1e-05,
+ "weak_weights_in_val_blend": {
+  "weak_an_d_cal": 0.05643,
+  "weak_ft_recency_cal": 0.02723,
+  "weak_ft_counts_cal": 0.0223,
+  "weak_ft_long90_cal": 0.00181
+ },
+ "test_weights_total": 0.039,
+ "test_weights_per_model": {
+  "weak_ft_counts_cal": {
+   "test": 0.039,
+   "freq": 0.72,
+   "corr": 0.9923,
+   "nearest": "behavonly_avg_cal"
+  },
+  "weak_an_a_cal": {
+   "test": 0.0,
+   "freq": 0.01,
+   "corr": 0.9988,
+   "nearest": "weak_an_b_cal"
+  },
+  "weak_an_b_cal": {
+   "test": 0.0,
+   "freq": 0.01,
+   "corr": 0.9989,
+   "nearest": "weak_an_c_cal"
+  },
+  "weak_an_c_cal": {
+   "test": 0.0,
+   "freq": 0.0,
+   "corr": 0.9989,
+   "nearest": "weak_an_b_cal"
+  },
+  "weak_an_d_cal": {
+   "test": 0.0,
+   "freq": 0.16,
+   "corr": 0.9974,
+   "nearest": "countaov_avg_cal"
+  },
+  "weak_ft_long90_cal": {
+   "test": 0.0,
+   "freq": 0.07,
+   "corr": 0.9911,
+   "nearest": "weak_rs_b_cal"
+  },
+  "weak_ft_recency_cal": {
+   "test": 0.0,
+   "freq": 0.26,
+   "corr": 0.9879,
+   "nearest": "behavonly_avg_cal"
+  },
+  "weak_ft_short14_cal": {
+   "test": 0.0,
+   "freq": 0.3,
+   "corr": 0.9632,
+   "nearest": "short14_cal"
+  },
+  "weak_rs_a_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9939,
+   "nearest": "weak_an_c_cal"
+  },
+  "weak_rs_b_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9947,
+   "nearest": "weak_an_c_cal"
+  },
+  "weak_rs_c_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9963,
+   "nearest": "twdeep_cal"
+  },
+  "weak_rs_d_cal": {
+   "test": 0.0,
+   "freq": 0.1,
+   "corr": 0.9959,
+   "nearest": "twdeep_cal"
+  },
+  "weak_tiny_a_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9989,
+   "nearest": "weak_tiny_b_cal"
+  },
+  "weak_tiny_b_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9989,
+   "nearest": "weak_tiny_a_cal"
+  },
+  "weak_tiny_c_cal": {
+   "test": 0.0,
+   "freq": 0.07,
+   "corr": 0.9983,
+   "nearest": "weak_tiny_b_cal"
+  },
+  "weak_tiny_d_cal": {
+   "test": 0.0,
+   "freq": 0.03,
+   "corr": 0.9989,
+   "nearest": "weak_tiny_a_cal"
+  }
+ },
+ "verdict": "направление закрыто: прирост семейства +0.000091 (неотриц. веса 1.7e-05, знако-свободные 9.1e-05) ниже порога 0.0003"
+}
