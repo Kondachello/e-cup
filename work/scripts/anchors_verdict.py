@@ -70,18 +70,30 @@ def main():
         }
         print(f"{name:<12} raw {res[name]['raw']:.6f}  cal(xfit) {res[name]['cal']:.6f}", flush=True)
 
-    d_raw = res["twl_v10"]["raw"] - res["twl_v10ctl"]["raw"]
-    d_cal = res["twl_v10"]["cal"] - res["twl_v10ctl"]["cal"]
+    # база — обучение на 14 срезах, как во всех наших моделях; остальные сравниваются с ней
+    base = MODELS[0]
+    deltas = {}
+    for name in MODELS[1:]:
+        deltas[name] = {
+            "delta_raw": round(res[name]["raw"] - res[base]["raw"], 6),
+            "delta_cal": round(res[name]["cal"] - res[base]["cal"], 6),
+        }
+    best = min(MODELS, key=lambda n: res[n]["cal"])
+    d_best = res[best]["cal"] - res[base]["cal"]
+    print(f"\nбаза {base} cal {res[base]['cal']:.6f}")
+    for n, dd in deltas.items():
+        print(f"  {n:<12} cal {res[n]['cal']:.6f}  дельта {dd['delta_cal']:+.6f}")
     out = {
         "models": res,
-        "delta_raw": round(d_raw, 6),
-        "delta_cal": round(d_cal, 6),
-        "helps": bool(d_cal < 0),
-        # reference scale: v7 tier moved -0.00065 / +0.00014 across two seeds and was
-        # rejected as noise; a single-seed effect below ~0.001 is not evidence.
-        "above_noise_floor": bool(abs(d_cal) > 0.001),
-        "verdict": ("v10 HELPS" if d_cal < -0.001 else
-                    "v10 HURTS" if d_cal > 0.001 else "NOISE (|delta| <= 0.001)"),
+        "base": base,
+        "deltas_vs_base": deltas,
+        "best_by_cal": best,
+        # порог: тир v7 дал -0.00065 и +0.00014 на двух сидах и был отвергнут как шум,
+        # поэтому одиночный эффект меньше 0.001 доказательством не считается
+        "above_noise_floor": bool(abs(d_best) > 0.001),
+        "verdict": ("БОЛЬШЕ СРЕЗОВ ПОМОГАЕТ" if d_best < -0.001 else
+                    "БОЛЬШЕ СРЕЗОВ ВРЕДИТ" if d_best > 0.001 else
+                    "ШУМ (|дельта| <= 0.001), нужен второй сид"),
     }
     (REPORTS_DIR / "anchors_verdict.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print("\n=== RAW JSON ===")
