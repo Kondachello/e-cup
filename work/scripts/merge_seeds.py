@@ -18,6 +18,8 @@ GROUPS = {
     "countaov_avg":["countaov", "countaov_s1337", "countaov_s7"],
     "fusion_avg":  ["fusion_f", "fusion_s7", "fusion_s2024"],
     "channel_avg": ["channel2", "channel_s1337"],
+    "twl_v7_avg":  ["twl_v7", "twl_v7_s1337", "twl_v7_s7"],
+    "behavonly_avg":["behavonly", "behavonly_s1337", "behavonly_s7"],
 }
 
 def main():
