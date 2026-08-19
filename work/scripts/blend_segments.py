@@ -488,7 +488,6 @@ def main() -> int:
     all_folds = tuple(range(a.folds))
     _, _, ws_full, wg_full = eval_shrunk(B, all_folds, all_folds, 1.0, alpha_full, ret_w=True)
     seg_solo = {}
-    model_map_lines = []
     print(f"\n=== карта весов (сегментация {best_seg}, чистые локальные NNLS, alpha={alpha_full}) ===")
     for s in range(B.n_seg):
         w = ws_full[s]
@@ -504,7 +503,6 @@ def main() -> int:
                        "sumw": round(float(w.sum()), 4)}
         line = (f"  [{s}] n={ns:>7} {labs[s][:60]:60s} rmsle {r_gl:.4f}->{r_loc:.4f} "
                 f"| " + ", ".join(f"{n} {v:.3f}" for n, v in top))
-        model_map_lines.append(line)
         print(line, flush=True)
 
     # ---------------- устойчивость: другие разбиения на фолды ----------------
@@ -560,43 +558,140 @@ def main() -> int:
                     z[seg_lab == s] = Xt[seg_lab == s] @ (lam * ws_dict[s] + (1 - lam) * wg)
                 return z
 
+            def crossfit_lp(Bx, seg_lab_v, seg_lab_t, lam, alpha):
+                """Тестовый бленд на КРОСС-ФИТНУТЫХ весах: юзер из фолда f получает веса,
+                подобранные без него. Снимает in-sample кредит, который predict_lb
+                иначе выдаёт направлению, подогнанному на val-таргет тех же юзеров."""
+                zg = np.zeros(len(uid_t))
+                zs = np.zeros(len(uid_t))
+                for f in range(a.folds):
+                    tr = tuple(g for g in range(a.folds) if g != f)
+                    wg, wl = Bx.fits(tr, alpha)
+                    idx = fold == f
+                    zg[idx] = Xt[idx] @ wg
+                    for s in range(Bx.n_seg):
+                        msk = idx & (seg_lab_t == s)
+                        if msk.any():
+                            zs[msk] = Xt[msk] @ (lam * wl[s] + (1 - lam) * wg)
+                return zg, zs
+
+            if not np.array_equal(uid, uid_t):
+                raise ValueError("val и test индексируют разные наборы user_id")
             lt_glob = Xt @ w_glob_full
             lt_seg = seg_lp(ws_full, wg_full, st, lam_full)
-            # placebo: случайная сегментация тех же размеров, та же процедура
+            lt_cf_glob, lt_cf_seg = crossfit_lp(B, sv, st, lam_full, alpha_full)
+            # placebo: случайные сегменты тех же размеров, ОДНИ И ТЕ ЖЕ метки на val и test
+            # (иначе val-подогнанное направление не переносится на тех же юзеров и контроль
+            #  ничего не контролирует)
             prng2 = np.random.default_rng(4242)
-            lab_v = np.concatenate([np.full(int(c), i)
-                                    for i, c in enumerate(np.bincount(sv, minlength=B.n_seg))])
-            lab_v = lab_v[prng2.permutation(N)].astype(np.int32)
-            lab_t = np.concatenate([np.full(int(c), i)
-                                    for i, c in enumerate(np.bincount(st, minlength=B.n_seg))])
-            lab_t = lab_t[prng2.permutation(len(uid_t))].astype(np.int32)
-            Bp2 = SegBlocks(X, ly, lab_v, fold, B.n_seg, a.folds)
+            lab = np.concatenate([np.full(int(c), i)
+                                  for i, c in enumerate(np.bincount(sv, minlength=B.n_seg))])
+            lab = lab[prng2.permutation(N)].astype(np.int32)
+            Bp2 = SegBlocks(X, ly, lab, fold, B.n_seg, a.folds)
             _, _, ws_p, wg_p = eval_shrunk(Bp2, all_folds, all_folds, 1.0, alpha_full,
                                            ret_w=True)
-            lt_plac = seg_lp(ws_p, wg_p, lab_t, lam_full)
+            lt_plac = seg_lp(ws_p, wg_p, lab, lam_full)
+            _, lt_cf_plac = crossfit_lp(Bp2, lab, lab, lam_full, alpha_full)
+
+            # разложение выигрыша на «посегментный УРОВЕНЬ» и «посегментную ФОРМУ»
+            d_seg = lt_cf_seg - lt_cf_glob
+            c_s = np.zeros(len(uid_t))
+            for s in range(B.n_seg):
+                msk = st == s
+                c_s[msk] = d_seg[msk].mean()
+            lt_level_only = lt_cf_glob + c_s      # только посегментный сдвиг уровня
+            lt_shape_only = lt_cf_seg - c_s       # перевес без сдвига уровня
 
             rows = {}
             for tag, lp_ in (("global", lt_glob), ("segmented", lt_seg),
-                             ("placebo_seg", lt_plac)):
+                             ("placebo_seg", lt_plac),
+                             ("global_crossfit", lt_cf_glob),
+                             ("segmented_crossfit", lt_cf_seg),
+                             ("placebo_crossfit", lt_cf_plac),
+                             ("seg_level_only", lt_level_only),
+                             ("seg_shape_only", lt_shape_only)):
                 r, f_sh, c = scored(lp_)
                 rows[tag] = {"pred": round(r["pred"], 6), "pred_shift_opt": round(f_sh, 6),
                              "mean_lp": round(float(lp_.mean()), 5),
                              "opt_shift": round(c, 5),
                              "sigma68": round(r["sigma68"], 6),
-                             "sd_resid": round(r["sd_resid"], 5)}
+                             "sd_resid": round(r["sd_resid"], 5),
+                             "f_span_only": round(r["f_span_only"], 6),
+                             "val_correction": round(r["val_correction"], 6),
+                             "novelty": float(f"{r['novelty']:.3e}"),
+                             "sd_lp": round(float(lp_.std()), 5)}
+            def dlt(x, base):
+                return round(rows[x]["pred_shift_opt"] - rows[base]["pred_shift_opt"], 6)
+
             lb = {"lam_used": lam_full, "variants": rows,
-                  "delta_raw": round(rows["segmented"]["pred"] - rows["global"]["pred"], 6),
-                  "delta_shift_opt": round(rows["segmented"]["pred_shift_opt"]
-                                           - rows["global"]["pred_shift_opt"], 6),
-                  "placebo_delta_shift_opt": round(rows["placebo_seg"]["pred_shift_opt"]
-                                                   - rows["global"]["pred_shift_opt"], 6)}
+                  "delta_shift_opt": dlt("segmented", "global"),
+                  "placebo_delta_shift_opt": dlt("placebo_seg", "global"),
+                  "delta_shift_opt_crossfit": dlt("segmented_crossfit", "global_crossfit"),
+                  "placebo_delta_shift_opt_crossfit": dlt("placebo_crossfit",
+                                                          "global_crossfit"),
+                  "delta_level_only": dlt("seg_level_only", "global_crossfit"),
+                  "delta_shape_only": dlt("seg_shape_only", "global_crossfit"),
+                  "per_segment_shift": {str(s): round(float(d_seg[st == s].mean()), 5)
+                                        for s in range(B.n_seg)}}
+            # на какие ЗАМЕРЕННЫЕ направления опирается выигрыш (span-разложение дельты)
+            cc = np.linalg.solve(P.G, P.B @ d_seg / P.N)
+            lb["delta_span_terms"] = [
+                (P.names[P.idx[i - 1]] if i else "_const", round(float(cc[i]), 4))
+                for i in np.argsort(-np.abs(cc))[:8]]
+            lb["delta_novelty"] = float(f"{float(((d_seg - cc @ P.B) ** 2).mean() / max((d_seg ** 2).mean(), 1e-15)):.3e}")
+
+            # Главное практическое следствие: несёт ли ДЕЙСТВУЮЩИЙ чемпион уже эти
+            # посегментные уровни? Накладываем c_s на замеренные сабмиты.
+            champ = {}
+            for cn in ("H1_applied.csv"):
+                try:
+                    uid_c, lp_c = PL.read_lp(cn)
+                except FileNotFoundError:
+                    continue
+                if not np.array_equal(uid_c, P.uid):
+                    continue
+                base = P.predict(lp_c)
+                cb = PL.MEAN_T - float(lp_c.mean())
+                base_sh = float(np.sqrt(max(base["pred"] ** 2 - cb ** 2, 1e-12)))
+                ent = {"measured_or_pred": round(base["pred"], 6),
+                       "shift_opt": round(base_sh, 6), "with_c_s": {}}
+                for k in (0.5, 1.0):
+                    lp2 = lp_c + k * (c_s - c_s.mean())
+                    r2 = P.predict(lp2)
+                    c2 = PL.MEAN_T - float(lp2.mean())
+                    sh2 = float(np.sqrt(max(r2["pred"] ** 2 - c2 ** 2, 1e-12)))
+                    ent["with_c_s"][str(k)] = {"pred": round(r2["pred"], 6),
+                                               "shift_opt": round(sh2, 6),
+                                               "delta_shift_opt": round(sh2 - base_sh, 6)}
+                champ[cn] = ent
+                print(f"  [{cn}] со сдвигом {base_sh:.6f} -> +c_s(k=0.5) "
+                      f"{ent['with_c_s']['0.5']['shift_opt']:.6f} "
+                      f"({ent['with_c_s']['0.5']['delta_shift_opt']:+.6f}), "
+                      f"+c_s(k=1.0) {ent['with_c_s']['1.0']['shift_opt']:.6f} "
+                      f"({ent['with_c_s']['1.0']['delta_shift_opt']:+.6f})", flush=True)
+            lb["champion_plus_segment_levels"] = champ
+            lb["corr_seg_vs_global_test"] = round(
+                float(np.corrcoef(lt_cf_seg, lt_cf_glob)[0, 1]), 6)
+            lb["sd_delta_test"] = round(float(d_seg.std()), 5)
             print("\n[predict_lb] (уровень пайплайн перемеряет на LB -> смотреть колонку "
                   "«со сдвигом»)")
             for tag, d in rows.items():
-                print(f"  {tag:12s} как есть {d['pred']:.6f}  со сдвигом {d['pred_shift_opt']:.6f}"
-                      f"  mean_lp {d['mean_lp']:.4f}  c* {d['opt_shift']:+.4f}")
-            print(f"  дельта (со сдвигом): сегментный {lb['delta_shift_opt']:+.6f}, "
-                  f"ПЛАЦЕБО {lb['placebo_delta_shift_opt']:+.6f}", flush=True)
+                print(f"  {tag:20s} как есть {d['pred']:.6f}  со сдвигом "
+                      f"{d['pred_shift_opt']:.6f}  span {d['f_span_only']:.6f} "
+                      f"val-попр {d['val_correction']:+.6f}  sd(ост) {d['sd_resid']:.4f} "
+                      f"nov {d['novelty']:.1e}")
+            print(f"  дельта (со сдвигом), in-sample веса: сегм {lb['delta_shift_opt']:+.6f}, "
+                  f"ПЛАЦЕБО {lb['placebo_delta_shift_opt']:+.6f}")
+            print(f"  дельта (со сдвигом), КРОСС-ФИТ:      сегм "
+                  f"{lb['delta_shift_opt_crossfit']:+.6f}, ПЛАЦЕБО "
+                  f"{lb['placebo_delta_shift_opt_crossfit']:+.6f}")
+            print(f"  разложение кросс-фит дельты: только УРОВЕНЬ "
+                  f"{lb['delta_level_only']:+.6f}, только ФОРМА "
+                  f"{lb['delta_shape_only']:+.6f}")
+            print(f"  посегментные сдвиги теста: {lb['per_segment_shift']}")
+            print(f"  на что опирается (span-разложение дельты, novelty "
+                  f"{lb['delta_novelty']:.1e}): " +
+                  ", ".join(f"{n} {v:+.3f}" for n, v in lb["delta_span_terms"]), flush=True)
         else:
             print("[predict_lb] пропуск: user_id теста не совпадает с базисом")
     except Exception as exc:                                  # noqa: BLE001
