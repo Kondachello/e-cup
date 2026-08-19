@@ -65,6 +65,19 @@ def best_row(rows, mode, key):
     return min(have, key=lambda r: r[key]) if have else None
 
 
+def _verdict(d_best: float, d_last: float | None, ks: list[int]) -> str:
+    """Вердикт формулируется ПО ДВУМ БАЗАМ отдельно: относительно лучшей точки
+    (фаза 1, валидация) и относительно последней (фаза 2, тест)."""
+    p1 = ("даёт" if d_best < -NOISE else "не даёт")
+    p2 = ("нет данных" if d_last is None else
+          "даёт" if d_last < -NOISE else "не даёт")
+    stab = ("оптимум k одинаков на всех сидах" if ks and len(set(ks)) == 1
+            else f"оптимум k ПЛЯШЕТ между сидами {ks}, фиксировать нельзя")
+    return (f"фаза 1 (против ЛУЧШЕЙ точки) {p1} {d_best:+.6f}; "
+            f"фаза 2 (против ПОСЛЕДНЕЙ точки) {p2} "
+            f"{'н/д' if d_last is None else f'{d_last:+.6f}'}; {stab}")
+
+
 def identical(a: str, b: str) -> bool | None:
     pa, pb = PREDS_DIR / f"{a}_val.parquet", PREDS_DIR / f"{b}_val.parquet"
     if not (pa.exists() and pb.exists()):
@@ -90,9 +103,19 @@ def main():
         if rows is None:
             missing.append(SWEEP_FMT.format(sd))
             continue
-        base = next(r for r in rows if r["mode"] == "top" and r["k"] == 1)
-        b = base["pred_avg_cal"]
-        rec = {"seed": sd, "baseline_cal": b, "n_ckpts": max(r["k"] for r in rows)}
+        # ДВЕ РАЗНЫЕ БАЗЫ, и их нельзя смешивать:
+        #   b_best — ЛУЧШАЯ точка по калиброванному критерию. Это то, что делает
+        #     фаза 1, откуда берутся ВАЛИДАЦИОННЫЕ прогнозы.
+        #   b_last — ПОСЛЕДНЯЯ точка. Это то, что делает фаза 2 (--final), откуда
+        #     берутся ТЕСТОВЫЕ прогнозы: там валидации нет вообще, ранняя
+        #     остановка не работает, выбрать лучшую точку физически нечем.
+        # Выигрыш относительно этих двух баз отличается на порядок, поэтому
+        # единственная цифра «выигрыш усреднения» бессмысленна.
+        b = next(r for r in rows if r["mode"] == "top" and r["k"] == 1)["pred_avg_cal"]
+        b_last = next(r for r in rows
+                      if r["mode"] == "last" and r["k"] == 1)["pred_avg_cal"]
+        rec = {"seed": sd, "baseline_cal": b, "baseline_last_cal": b_last,
+               "n_ckpts": max(r["k"] for r in rows)}
 
         # k=1 в любом режиме — это одна точка, поэтому усреднение весов при k=1
         # обязано дать ровно её же прогноз; расхождение означает ошибку в коде
@@ -109,13 +132,31 @@ def main():
                 rec[f"{meth}_{mode}_best_k"] = r["k"]
                 rec[f"{meth}_{mode}_cal"] = r[key]
                 rec[f"{meth}_{mode}_delta"] = round(r[key] - b, 6)
+                if mode == "last":   # база фазы 2 — последняя точка
+                    rec[f"{meth}_last_delta_vs_last"] = round(r[key] - b_last, 6)
+        # ФИКСИРОВАННОЕ k=3: оптимум, найденный на сиде 555. Берём его значение
+        # на КАЖДОМ сиде, иначе «лучшее k» подбирается по тем же данным, на
+        # которых меряется, и выигрыш завышен отбором.
+        for meth, key in (("a", "pred_avg_cal"), ("b", "swa_cal")):
+            r3 = next((r for r in rows
+                       if r["mode"] == "last" and r["k"] == 3 and key in r), None)
+            if r3 is not None:
+                rec[f"{meth}_k3_cal"] = r3[key]
+                rec[f"{meth}_k3_delta_vs_best"] = round(r3[key] - b, 6)
+                rec[f"{meth}_k3_delta_vs_last"] = round(r3[key] - b_last, 6)
         per_seed.append(rec)
         ident[str(sd)] = {"sweep_val_bit_identical_to_escal":
                           identical(SWEEP_FMT.format(sd), BASE_FMT.format(sd))}
-        print(f"seed {sd}: база (одна точка) {b:.6f} | "
-              f"(а) last k={rec.get('a_last_best_k')} {rec.get('a_last_cal')} "
-              f"{rec.get('a_last_delta'):+.6f} | "
-              f"(б) last k={rec.get('b_last_best_k')} {rec.get('b_last_cal')} "
+        print(f"seed {sd}: база ФАЗЫ 1 (лучшая точка) {b:.6f}, "
+              f"база ФАЗЫ 2 (последняя точка) {b_last:.6f}", flush=True)
+        print(f"        (а) last лучшее k={rec.get('a_last_best_k')} "
+              f"{rec.get('a_last_cal')}: против лучшей {rec.get('a_last_delta'):+.6f}, "
+              f"против последней {rec.get('a_last_delta_vs_last'):+.6f}", flush=True)
+        print(f"        (а) при k=3 фиксировано {rec.get('a_k3_cal')}: "
+              f"против лучшей {rec.get('a_k3_delta_vs_best'):+.6f}, "
+              f"против последней {rec.get('a_k3_delta_vs_last'):+.6f}", flush=True)
+        print(f"        (б) last лучшее k={rec.get('b_last_best_k')} "
+              f"{rec.get('b_last_cal')} против лучшей "
               f"{rec.get('b_last_delta'):+.6f}", flush=True)
         print(f"        верхняя граница top: (а) {rec.get('a_top_delta'):+.6f} "
               f"k={rec.get('a_top_best_k')} | (б) {rec.get('b_top_delta'):+.6f} "
@@ -141,12 +182,22 @@ def main():
     ident_ok = all(v is not False for d in ident.values() for v in d.values())
     k1_ok = all(r.get("swa_k1_matches_pred_k1") is not False for r in per_seed)
 
+    ks = [r["a_last_best_k"] for r in per_seed if "a_last_best_k" in r]
     out = {
         "per_seed": per_seed,
+        # база ФАЗЫ 1 (лучшая точка) — определяет валидационные прогнозы
         "method_a_delta": a_delta,          # усреднение прогнозов, режим last
         "method_b_delta": b_delta,          # усреднение весов, режим last
         "method_a_delta_top": avg("a_top_delta"),
         "method_b_delta_top": avg("b_top_delta"),
+        # база ФАЗЫ 2 (последняя точка) — определяет ТЕСТОВЫЕ прогнозы
+        "method_a_delta_vs_last": avg("a_last_delta_vs_last"),
+        "method_b_delta_vs_last": avg("b_last_delta_vs_last"),
+        # то же при ЖЁСТКО зафиксированном k=3, без подбора k по тем же данным
+        "k3_delta_vs_best": avg("a_k3_delta_vs_best"),
+        "k3_delta_vs_last": avg("a_k3_delta_vs_last"),
+        "best_k_per_seed": ks,
+        "best_k_stable": bool(ks and len(set(ks)) == 1),
         "best_k": mode_k("a_last_best_k" if (a_delta or 0) <= (b_delta or 0)
                          else "b_last_best_k"),
         "baseline_cal": avg("baseline_cal"),
@@ -161,9 +212,7 @@ def main():
         "verdict": ("СЛОМАНО: путь по умолчанию изменился, сравнение недействительно"
                     if not ident_ok else
                     "СЛОМАНО: SWA при k=1 не равен одной точке" if not k1_ok else
-                    "РАБОТАЕТ" if best < -NOISE else
-                    "ВРЕДИТ" if best > NOISE else
-                    f"ШУМ (|дельта| <= {NOISE})"),
+                    _verdict(best, avg("a_k3_delta_vs_last"), ks)),
     }
 
     if args.archive_identical and ident_ok:
