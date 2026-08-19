@@ -1,137 +1,188 @@
-"""Персональный случайный эффект (random effect) в остатках модели.
+"""Персональный случайный эффект (random effect) в остатках: ОПРОВЕРГНУТ.
 
-Идея: одни и те же 250k юзеров есть во всех срезах, включая тест. Если у юзера
-есть устойчивое личное смещение, которого не ловят признаки, оно должно быть видно
-как корреляция средних остатков на НЕПЕРЕСЕКАЮЩИХСЯ по целевому окну группах срезов.
+Гипотеза: одни и те же 250k юзеров есть во всех срезах, включая тест, поэтому у юзера
+может быть устойчивое личное смещение, которое признаки не ловят. В LTV-задачах это
+стандартный per-user random effect, и у нас его нет ни в каком виде.
 
-Здесь считаются только остатки (out-of-time, кросс-фит по половинам срезов):
-  fold1: обучение на ранней половине (2025-07-02..09-17) -> предсказание поздней
-  fold2: обучение на поздней половине (2025-09-24..12-10) -> предсказание ранней
-Так у каждого среза остаток получен моделью, которая этот срез НЕ видела.
+Источник остатков БЕЗ обучения: work/features/anchor=*.seqoof.parquet — честные
+time-split OOF-прогнозы seq-трансформера (обучен только на срезах <= 2025-11-12,
+предсказывает 2025-11-19..2026-01-07). Это E[log1p(y30)] прямо в лог-пространстве,
+8 срезов с известным таргетом -> остаток r = log1p(y) - lp без единой минуты обучения.
 
-Рецепт чемпионский: lgb, objective tweedie (power 1.45) на log1p-таргете,
-USE_V2/V3/V4. Ранняя остановка — по отложенным 10% ЮЗЕРОВ внутри обучающей половины.
+ЛОВУШКА (главная): шаг срезов 7 дней при окне таргета 30 дней -> целевые окна соседних
+срезов пересекаются на 23 дня и остатки коррелируют механически. Здесь группы разнесены
+на >=35 дней по якорю (окна не пересекаются вообще) + приведён контроль на пересекающихся.
 
-Выход: work/preds/resid_re/{fold}.parquet со столбцами user_id, anchor, lp, ly.
-Запуск: OMP_NUM_THREADS=2 POLARS_MAX_THREADS=3 USE_V2=1 USE_V3=1 USE_V4=1 \
-        .venv/bin/python work/scripts/resid_re.py --threads 2
+ВТОРАЯ ЛОВУШКА: сегментное смещение калибровочной кривой тоже даёт корреляцию, но это не
+персональный эффект. Поэтому внутри каждого среза снимается E[r | бин прогноза] (40 бинов).
+
+Запуск (секунды, 1 поток):
+  POLARS_MAX_THREADS=2 OMP_NUM_THREADS=1 .venv/bin/python work/scripts/resid_re.py
 """
 from __future__ import annotations
 
-import argparse
-import gc
-import os
+import json
 import sys
-import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import PREDS_DIR, VAL_ANCHOR, feature_cols, load_anchor
+from common import FEATURES_DIR, PREDS_DIR, REPORTS_DIR, VAL_ANCHOR, load_anchor
 
-# 24 недельных среза с полным покрытием тиров v2/v3/v4 (февральские 2025 без v2)
-ANCHORS = [date(2025, 7, 2) + timedelta(days=7 * i) for i in range(24)]
-EARLY, LATE = ANCHORS[:12], ANCHORS[12:]
+ANCHORS = [date(2025, 11, 19), date(2025, 11, 26), date(2025, 12, 3), date(2025, 12, 10),
+           date(2025, 12, 17), date(2025, 12, 24), date(2025, 12, 31), date(2026, 1, 7)]
+# срезы-предикторы для применения на валидации: их целевые окна кончаются <= 09.01,
+# валидационное окно начинается 15.01 -> пересечения нет
+PRED_IDX = [0, 1, 2, 3]
+NOISE = 2.2e-5  # цена одного подобранного направления в RMSLE (noise_floor.py)
 
-CHAMP = dict(
-    objective="tweedie", tweedie_variance_power=1.45, metric="rmse",
-    learning_rate=0.04, num_leaves=255, min_data_in_leaf=300,
-    feature_fraction=0.75, bagging_fraction=0.8, bagging_freq=1,
-    lambda_l2=5.0, max_bin=127, seed=42, verbosity=-1,
-)
-OUT = PREDS_DIR / "resid_re"
-
-
-def build_split(anchors, cols, es_uid: np.ndarray):
-    """Поанкорная загрузка сразу в две преаллоцированные матрицы (fit / early-stop).
-
-    Пик памяти = итоговые матрицы + один срез, без промежуточного vstack.
-    """
-    head = load_anchor(anchors[0], columns=["user_id"])
-    n_per, n_f = head.height, len(cols)
-    es_mask0 = np.isin(head["user_id"].to_numpy(), es_uid)
-    n_es, n_tr = int(es_mask0.sum()), n_per - int(es_mask0.sum())
-    Xtr = np.empty((n_tr * len(anchors), n_f), np.float32)
-    Xes = np.empty((n_es * len(anchors), n_f), np.float32)
-    ytr = np.empty(n_tr * len(anchors), np.float64)
-    yes = np.empty(n_es * len(anchors), np.float64)
-    for i, a in enumerate(anchors):
-        df = load_anchor(a, columns=["user_id", "target"] + cols)
-        assert df.height == n_per, f"{a}: {df.height} != {n_per}"
-        m = np.isin(df["user_id"].to_numpy(), es_uid)
-        Xa = df.select(cols).to_numpy().astype(np.float32)
-        ya = np.log1p(df["target"].to_numpy().astype(np.float64))
-        Xtr[i * n_tr:(i + 1) * n_tr] = Xa[~m]
-        Xes[i * n_es:(i + 1) * n_es] = Xa[m]
-        ytr[i * n_tr:(i + 1) * n_tr] = ya[~m]
-        yes[i * n_es:(i + 1) * n_es] = ya[m]
-        del df, Xa, ya
-        gc.collect()
-    return Xtr, ytr, Xes, yes
+# лучший честный бленд (blend_reopt.json -> winner, OOF 1.666746)
+BLEND_W = {"fusion_avg_cal": 0.182158, "fusion_f_cal": 0.145958, "c_ts2_s42_cal": 0.11936,
+           "c_ts2_avg_cal": 0.117003, "mlpziln_avg_cal": 0.084174, "behavonly_cal": 0.078989,
+           "seq2tr_f_cal": 0.06909, "countaov_cal": 0.066059, "twl_v7_cal": 0.055507,
+           "mlpziln_cal": 0.041982, "hmmsim_cal": 0.022222, "channel2_cal": 0.015367,
+           "hmmsim": 0.004673}
 
 
-def run_fold(tag: str, tr_anchors, pr_anchors, cols, n_est: int, threads: int, seed: int):
-    import lightgbm as lgb
-    t0 = time.time()
-    uni = load_anchor(tr_anchors[0], columns=["user_id"])["user_id"].to_numpy()
-    rng = np.random.default_rng(777)
-    es_uid = np.sort(rng.choice(uni, size=len(uni) // 10, replace=False))
+def load_resid():
+    R, LP, uid = [], [], None
+    for a in ANCHORS:
+        s = pl.read_parquet(FEATURES_DIR / f"anchor={a}.seqoof.parquet").sort("user_id")
+        t = load_anchor(a, columns=["user_id", "target"]).sort("user_id")
+        uid = t["user_id"].to_numpy()
+        assert (s["user_id"].to_numpy() == uid).all()
+        lp = s["seqoof_pred"].to_numpy().astype(np.float64)
+        LP.append(lp)
+        R.append(np.log1p(t["target"].to_numpy().astype(np.float64)) - lp)
+    return uid, np.stack(R), np.stack(LP)
 
-    Xtr, ytr, Xes, yes = build_split(tr_anchors, cols, es_uid)
-    print(f"[{tag}] fit {Xtr.shape}, es {Xes.shape}, load {time.time()-t0:.0f}s", flush=True)
-    p = dict(CHAMP, num_threads=threads, seed=seed)
-    dtr = lgb.Dataset(Xtr, ytr, free_raw_data=True)
-    dva = lgb.Dataset(Xes, yes, reference=dtr, free_raw_data=True)
-    m = lgb.train(p, dtr, num_boost_round=n_est, valid_sets=[dva],
-                  callbacks=[lgb.early_stopping(200, verbose=False), lgb.log_evaluation(500)])
-    best = m.best_iteration or n_est
-    print(f"[{tag}] fitted, best_iter={best}, {time.time()-t0:.0f}s", flush=True)
-    del Xtr, ytr, Xes, yes, dtr, dva
-    gc.collect()
 
-    rows = []
-    for a in pr_anchors:
-        df = load_anchor(a, columns=["user_id", "target"] + cols)
-        Xa = df.select(cols).to_numpy().astype(np.float32)
-        lp = np.clip(m.predict(Xa, num_iteration=best), 0, None)
-        ly = np.log1p(df["target"].to_numpy().astype(np.float64))
-        rows.append(pl.DataFrame({
-            "user_id": df["user_id"].to_numpy().astype(np.int64),
-            "anchor": np.full(len(lp), a.isoformat()),
-            "lp": lp.astype(np.float32), "ly": ly.astype(np.float32),
-        }))
-        r = ly - lp
-        print(f"[{tag}] {a} rmsle={float(np.sqrt((r**2).mean())):.4f} mean_r={float(r.mean()):+.4f}",
-              flush=True)
-        del df, Xa
-        gc.collect()
-    OUT.mkdir(parents=True, exist_ok=True)
-    pl.concat(rows).write_parquet(OUT / f"{tag}.parquet")
-    del m
-    gc.collect()
-    print(f"[{tag}] done in {time.time()-t0:.0f}s", flush=True)
+def decal(R, LP, bins=40):
+    """Снять внутри каждого среза среднее остатка по бину прогноза (кривую калибровки)."""
+    out = R.copy()
+    for j in range(R.shape[0]):
+        lp, r = LP[j], out[j]
+        qs = np.quantile(lp, np.linspace(0, 1, bins + 1))
+        qs[0] -= 1e-9
+        qs[-1] += 1e-9
+        b = np.clip(np.searchsorted(qs, lp, side="left") - 1, 0, bins - 1)
+        cnt = np.bincount(b, minlength=bins)
+        sm = np.bincount(b, weights=r, minlength=bins)
+        out[j] = r - np.where(cnt > 0, sm / np.maximum(cnt, 1), 0.0)[b]
+    return out
+
+
+def cen(x):
+    return x - x.mean()
+
+
+def cr(a, b):
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def fit_shifts(x, y, bins=24):
+    qs = np.quantile(x, np.linspace(0, 1, bins + 1))
+    qs[0] -= 1e-9
+    qs[-1] += 1e-9
+    c, s = [], []
+    for i in range(bins):
+        m = (x > qs[i]) & (x <= qs[i + 1])
+        if m.sum() < 500:
+            continue
+        c.append(x[m].mean())
+        s.append(y[m].mean() - x[m].mean())
+    return np.array(c), np.array(s)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--threads", type=int, default=2)
-    ap.add_argument("--n-est", type=int, default=6000)
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--folds", type=str, default="1,2")
-    args = ap.parse_args()
-    os.environ["OMP_NUM_THREADS"] = str(args.threads)
+    uid, R, LP = load_resid()
+    Rd = decal(R, LP)
+    n = len(uid)
+    print(f"юзеров {n}, срезов {len(ANCHORS)}, sd остатка {R.std():.4f} "
+          f"(после декалибровки {Rd.std():.4f})")
 
-    cols = feature_cols(load_anchor(ANCHORS[0]))
-    print(f"{len(cols)} features; early {EARLY[0]}..{EARLY[-1]}, late {LATE[0]}..{LATE[-1]}",
-          flush=True)
-    folds = set(args.folds.split(","))
-    if "1" in folds:
-        run_fold("fold1_trainEARLY_predLATE", EARLY, LATE, cols, args.n_est, args.threads, args.seed)
-    if "2" in folds:
-        run_fold("fold2_trainLATE_predEARLY", LATE, EARLY, cols, args.n_est, args.threads, args.seed)
+    out = {"n_users": n, "se_corr": float(1 / np.sqrt(n)), "pairs": {}}
+    pairs = [("11-19+11-26", "12-31+01-07", [0, 1], [6, 7], 35),
+             ("11-19", "01-07", [0], [7], 49),
+             ("11-19+11-26+12-03", "01-07", [0, 1, 2], [7], 35),
+             ("КОНТРОЛЬ пересекающихся", "12-03+12-10", [0, 1], [2, 3], 7)]
+    print(f"\n{'группы':44s} {'дней':>5s} {'corr':>8s} {'corr_знак':>10s}")
+    for na, nb, ia, ib, gap in pairs:
+        a, b = cen(Rd[ia].mean(0)), cen(Rd[ib].mean(0))
+        sa, sb = cen(np.sign(Rd[ia]).mean(0)), cen(np.sign(Rd[ib]).mean(0))
+        out["pairs"][f"{na}|{nb}"] = dict(gap_days=gap, corr=cr(a, b), corr_sign=cr(sa, sb))
+        print(f"{na + ' | ' + nb:44s} {gap:5d} {cr(a, b):8.4f} {cr(sa, sb):10.4f}")
+
+    # var(u) из ковариации непересекающихся групп; шум окна из дисперсии одного среза
+    m1, m2 = cen(Rd[[0, 1]].mean(0)), cen(Rd[[6, 7]].mean(0))
+    var_u, var_e = float((m1 * m2).mean()), float(Rd[7].var())
+    print(f"\nvar(u)={var_u:.5f} sd(u)={np.sqrt(max(var_u, 0)):.4f}; "
+          f"дисперсия остатка одного окна {var_e:.4f}")
+    proj = {}
+    for k in (1, 2, 4, 8, 16, 10 ** 6):
+        g = var_u ** 2 / (var_u + var_e / k)
+        proj[k] = g / (2 * 1.667)
+        print(f"  потолок при k={k:>7d} независимых окон: {proj[k]:.6f} RMSLE "
+              f"({proj[k] / NOISE:.1f} шумов)")
+    out.update(var_u=var_u, var_window=var_e,
+               ceiling_by_k={str(k): v for k, v in proj.items()})
+
+    # ---- честная проверка на валидации: поправка оценена ТОЛЬКО по обучающим срезам ----
+    m = cen(Rd[PRED_IDX].mean(0))
+    lam = max(var_u, 0.0) / float((m * m).mean())
+    u_eb = lam * m
+    u_sign = cen(np.sign(Rd[PRED_IDX]).mean(0))
+    val = load_anchor(VAL_ANCHOR, columns=["user_id", "target"]).sort("user_id")
+    ly = np.log1p(val["target"].to_numpy().astype(np.float64))
+    assert (val["user_id"].to_numpy() == uid).all()
+    lp, tot = np.zeros(n), 0.0
+    for name, w in BLEND_W.items():
+        d = pl.read_parquet(PREDS_DIR / f"{name}_val.parquet").sort("user_id")
+        lp += w * np.log1p(np.clip(d["pred"].to_numpy().astype(np.float64), 0, None))
+        tot += w
+    lp /= tot
+    rng = np.random.default_rng(0)
+    half = rng.permutation(n) < n // 2
+
+    def cal(v):
+        t = 0.0
+        for f in (half, ~half):
+            c, s = fit_shifts(v[~f], ly[~f])
+            adj = np.clip(v[f] + np.interp(v[f], c, s), 0, None)
+            t += float(((ly[f] - adj) ** 2).mean()) * f.sum()
+        return float(np.sqrt(t / n))
+
+    base = cal(lp)
+    print(f"\nбаза (бленд после калибровки, 2-fold honest): {base:.6f}")
+    out["val_rmsle_base"] = base
+    out["val"] = {}
+    grid = [-0.04, -0.01, 0.005, 0.01, 0.02, 0.04, 0.1, 0.5, 1.0]
+    for nm, u in (("eb_mean", u_eb), ("sign", u_sign)):
+        curve = {float(c): cal(lp + c * u) for c in grid}
+        bc = min(curve, key=curve.get)
+        d = base - curve[bc]
+        out["val"][nm] = dict(best_c=bc, best=curve[bc], delta=d, in_noise=d / NOISE,
+                              curve={str(k): v for k, v in curve.items()})
+        print(f"  [{nm}] лучший c={bc:+.3f}: {curve[bc]:.6f}, delta {d:+.6f} "
+              f"({d / NOISE:.1f} шумов)")
+
+    # почему устойчивость знака (0.23) ничего не даёт: её знает сам бленд
+    def resid_on(x, b):
+        b0 = cen(b)
+        return x - (np.dot(cen(x), b0) / np.dot(b0, b0)) * b0
+
+    a, b = np.sign(Rd[[0, 1]]).mean(0), np.sign(Rd[[6, 7]]).mean(0)
+    out["sign_corr_raw"] = cr(a, b)
+    out["sign_corr_after_blend"] = cr(resid_on(a, lp), resid_on(b, lp))
+    out["corr_sign_with_blend_pred"] = cr(u_sign, lp)
+    print(f"\nустойчивость знака остатка: сырая {out['sign_corr_raw']:.4f} -> "
+          f"после снятия прогноза бленда {out['sign_corr_after_blend']:.4f} "
+          f"(corr со прогнозом {out['corr_sign_with_blend_pred']:.4f})")
+    (REPORTS_DIR / "resid_re.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    print("сохранено work/reports/resid_re.json")
 
 
 if __name__ == "__main__":
