@@ -15,6 +15,7 @@ The reference blend is the current champion mix, blended in log1p space.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -24,7 +25,13 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from common import PREDS_DIR, VAL_ANCHOR, load_anchor, rmsle
 
-BLEND = {"mlpziln_cal": 0.536, "mlpbin_cal": 0.283, "gru_final": 0.145, "c_xtw_s42": 0.036}
+# Действующий честный бленд (val OOF 1.666718). Прежний эталон содержал gru_final
+# с весом 0.145 — модель, обученную до введения зазора 30 дней, её валидационный скор
+# завышен. Из-за этого критерий систематически занижал вес новых моделей: febspec2
+# получал -0.005 против эталона и +0.0156 против настоящего пула.
+BLEND = {"fusion_f_cal": 0.32, "c_ts2_s42_cal": 0.25, "mlpziln_cal": 0.12,
+         "behavonly_cal": 0.08, "countaov_cal": 0.07, "seq2tr_f_cal": 0.07,
+         "twl_v7_cal": 0.055, "hmmsim_cal": 0.028, "channel2_cal": 0.012}
 
 
 def load_lp(path: Path, uid_ref: np.ndarray) -> np.ndarray:
@@ -41,7 +48,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*", help="model names -> work/preds/NAME_val.parquet")
     ap.add_argument("--file", action="append", default=[], help="explicit parquet path(s)")
+    ap.add_argument("--json", type=str, default="",
+                    help="also write the table as JSON (blend score + one row per model)")
     args = ap.parse_args()
+    out = {"models": {}}
 
     val = load_anchor(VAL_ANCHOR, columns=["user_id", "target"]).sort("user_id")
     uid = val["user_id"].to_numpy()
@@ -50,7 +60,9 @@ def main():
 
     lb = blend_lp(uid)
     eb = lb - ly
-    print(f"blend val_rmsle={float(np.sqrt(np.mean(eb ** 2))):.6f}  n={len(y)}", flush=True)
+    blend_rmsle = float(np.sqrt(np.mean(eb ** 2)))
+    out["blend"] = {"rmsle": blend_rmsle, "n": int(len(y)), "weights": BLEND}
+    print(f"blend val_rmsle={blend_rmsle:.6f}  n={len(y)}", flush=True)
 
     targets = [(n, PREDS_DIR / f"{n}_val.parquet") for n in args.names]
     targets += [(Path(f).stem, Path(f)) for f in args.file]
@@ -65,9 +77,15 @@ def main():
         d = e - eb
         w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))
         best = float(np.sqrt(np.mean(((1 - w) * lb + w * lp - ly) ** 2)))
+        out["models"][name] = {"val_rmsle": rmsle(y, np.expm1(lp)), "err_corr": c,
+                               "w_opt": w, "blend_rmsle": best,
+                               "gain": blend_rmsle - best}
         print(f"{name}: val_rmsle={rmsle(y, np.expm1(lp)):.6f}  err_corr={c:.4f}  "
-              f"w*={w:.3f} -> {best:.6f} (gain {float(np.sqrt(np.mean(eb ** 2))) - best:+.6f})",
+              f"w*={w:.3f} -> {best:.6f} (gain {blend_rmsle - best:+.6f})",
               flush=True)
+    if args.json:
+        Path(args.json).write_text(json.dumps(out, indent=1))
+        print(f"wrote {args.json}", flush=True)
 
 
 if __name__ == "__main__":

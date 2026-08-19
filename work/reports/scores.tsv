@@ -184,3 +184,4 @@ twl_a20	1.690114	число срезов 20 из 23 доступных чист�
 twl_aall	1.689797	число срезов 23 из 23 доступных чистых; 23 включает три февральских 2025, чьё целевое окно содержит 8 марта; всё прочее идентично
 febspec2	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
 febspec2_cal	1.770665	binned log-shift calibration of febspec2; holdout 1.782185->1.768060
+mlpbin_big	1.677559	WIDTH arm: 1024,512,256 vs mlpbin 512,256 (all else identical). Smoke paired d_cal=-0.00107+-0.00037 over 9 runs; holdout raw=1.677834 cal=1.669343
