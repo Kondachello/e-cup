@@ -32,6 +32,24 @@ Phases (train_seq2 contract):
     <= 2025-12-10), early stop on VAL RMSLE (eval every --eval-every steps,
     patience 3 evals); non-smoke saves val preds (exp_lib.save_preds) +
     log_score under NAME + models/NAME_stats.npz.
+
+Early-stopping criterion (--es-metric):
+  raw (default, historical behaviour)  plain val RMSLE of the checkpoint.
+  cal                                  the honest CALIBRATED val RMSLE — the same
+    binned log-shift calibrate.py applies before this model ever reaches a blend.
+    Every prediction file is calibrated (KNOWLEDGE.md "ПОРЯДОК ОПЕРАЦИЙ"), and the
+    calibration rewrites the LEVEL of the forecast; so stopping on the raw score
+    picks the checkpoint with the best level, a gain calibration would have handed
+    over for free, while giving up RANKING, which calibration preserves.  Measured:
+    finer eval (246 vs 984 steps) moved the 5-seed fusion_v3 average from raw
+    1.681560 -> 1.677117 but calibrated 1.668594 -> 1.669033, i.e. the sharper
+    optimum of the raw metric was the WORSE model.
+    Honest cut: shifts are fitted on one half of the validation users and scored on
+    table was fitted on.  Cost is ~1% of one evaluation (the forward pass over the
+    250k val rows dominates), so it is computed at every eval, no throttling.
+    --es-metric never touches training itself: same seeds, same batches, same steps.
+    It only decides WHICH checkpoint is kept, so --final test preds (retrained with
+    no early stopping) are bit-identical between the two arms.
   --final: additionally retrain on ALL seq3 anchors + VAL for --epochs
     epochs (no early stop), save TEST preds. Multi-seed: raw-GMV averaging.
 
@@ -70,6 +88,7 @@ os.environ.setdefault("USE_V3", "1")
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calibrate import apply_shifts, fit_shifts  # noqa: E402
 from common import (TEST_ANCHOR, VAL_ANCHOR, WORK, feature_cols,  # noqa: E402
                     load_anchor, rmsle, user_universe)
 from exp_lib import log_score, save_preds  # noqa: E402
@@ -115,6 +134,17 @@ def parse_args():
                    help="also retrain on ALL 12 anchors + VAL, save test preds")
     p.add_argument("--eval-every", type=int, default=2000)
     p.add_argument("--patience", type=int, default=3)
+    p.add_argument("--es-metric", choices=("raw", "cal"), default="raw",
+                   help="early-stopping criterion: raw val RMSLE (default, keeps "
+                        "historical behaviour bit-for-bit) or the honest calibrated "
+                        "one (calibrate.py binned log-shift, 2-fold over users)")
+    p.add_argument("--retrain-from-best", action="store_true",
+                   help="масштабировать длину переобучения от найденной точки "
+                        "остановки (как делает бустинг), а не гнать фиксированное "
+                        "число эпох; по умолчанию выключено, поведение прежнее")
+    p.add_argument("--es-bins", type=int, default=24,
+                   help="quantile bins of the --es-metric cal calibration "
+                        "(calibrate.py default is 24; keep them equal)")
     p.add_argument("--notes", default="")
     return p.parse_args()
 
@@ -262,10 +292,34 @@ def predict_log(model, x_mm, xtab, idx, device, eval_batch):
     return out
 
 
+def cal_rmsle_2fold(pred_log: np.ndarray, ly: np.ndarray, y_raw: np.ndarray,
+                    half: np.ndarray, bins: int):
+    """Honest calibrated val RMSLE of a checkpoint -> (pooled, single_fold).
+
+    Same transform as calibrate.py (fit_shifts / apply_shifts imported from it), but
+    the shift table is never applied to the rows it was fitted on: half A fits the
+    shifts that score half B and vice versa, so no row is calibrated by itself.
+    `pooled` scores all rows this way (the criterion actually used); `single_fold` is
+    only the B half, i.e. exactly the number calibrate.py prints as `holdout`, kept
+    for eyeballing the two against each other in the logs.
+
+    Both folds are honest, so using both is the same estimator with half the variance
+    — which matters here, because the differences being resolved are ~1e-4.
+    """
+    lp = np.clip(np.asarray(pred_log, dtype=np.float64), 0, None)
+    out = np.empty_like(lp)
+    c_a, s_a = fit_shifts(lp[half], ly[half], bins)
+    out[~half] = apply_shifts(lp[~half], c_a, s_a)
+    c_b, s_b = fit_shifts(lp[~half], ly[~half], bins)
+    out[half] = apply_shifts(lp[half], c_b, s_b)
+    return (rmsle(y_raw, np.expm1(out)),
+            rmsle(y_raw[~half], np.expm1(out[~half])))
+
+
 # ---------------- training ----------------
 
 def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epochs,
-              val=None, eval_every=0, patience=3, label="p1"):
+              val=None, eval_every=0, patience=3, label="p1", cal_secs=None):
     """val = (val_x_mm, val_tab, val_y30_raw, idx) -> early stop on VAL RMSLE.
     Returns (model, best_state, best_rmsle, best_step, steps_done)."""
     import torch
@@ -289,20 +343,39 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
     last_eval_step = -1
     t0 = time.time()
 
+    # Calibrated criterion: prepared once, and ONLY when asked for — the raw path
+    # must not touch a single extra RNG draw (default_rng(0) here is its own stream
+    # and independent of `rng`/torch either way).
+    es_cal = val is not None and getattr(args, "es_metric", "raw") == "cal"
+    es_y = es_ly = es_half = None
+    if es_cal:
+        es_y = val[2][val[3]]
+        es_ly = np.log1p(np.clip(es_y, 0, None))
+        es_half = np.random.default_rng(0).permutation(len(es_y)) < len(es_y) // 2
+
     def do_eval():
         nonlocal best_state, best_rmsle, best_step, bad, stop, last_eval_step
         val_x, val_tab, vy_raw, idx = val
         pred_log = predict_log(model, val_x, val_tab, idx, device, args.eval_batch)
         vr = rmsle(vy_raw[idx], np.expm1(np.clip(pred_log, 0, None)))
         last_eval_step = step
-        if vr < best_rmsle - 1e-5:
-            best_rmsle, best_step, bad = vr, step, 0
+        crit, extra = vr, ""
+        if es_cal:
+            tc = time.time()
+            vc, vc1 = cal_rmsle_2fold(pred_log, es_ly, es_y, es_half, args.es_bins)
+            dt = time.time() - tc
+            if cal_secs is not None:
+                cal_secs.append(dt)
+            crit = vc
+            extra = f" | CAL {vc:.5f} (holdout {vc1:.5f}, +{dt:.2f}s)"
+        if crit < best_rmsle - 1e-5:
+            best_rmsle, best_step, bad = crit, step, 0
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             mark = " *"
         else:
             bad += 1
             mark = ""
-        print(f"  [{label} s{seed}] EVAL step {step}: val_rmsle {vr:.5f}{mark} "
+        print(f"  [{label} s{seed}] EVAL step {step}: val_rmsle {vr:.5f}{extra}{mark} "
               f"(best {best_rmsle:.5f} @ {best_step}, bad {bad}/{patience})", flush=True)
         if bad >= patience:
             stop = True
@@ -445,12 +518,14 @@ def main():
 
     # ---- Phase 1: selection train + early stop on VAL ----
     val_pred_sum, per_seed_rmsle, best_steps = None, [], []
+    cal_secs: list[float] = []
     for seed in seeds:
         model, best_state, _, best_step, steps_done = run_train(
             args, device, seed, d_tab, xs1, tabs1, ylogs1, ybuys1,
             max_steps=max_steps, epochs=args.epochs,
             val=(val_x, val_tab, val_y30_raw, val_idx),
-            eval_every=eval_every, patience=args.patience, label="p1")
+            eval_every=eval_every, patience=args.patience, label="p1",
+            cal_secs=cal_secs)
         model.load_state_dict(best_state)
         pred_log = predict_log(model, val_x, val_tab, val_idx, device, args.eval_batch)
         pred_raw = np.expm1(np.clip(pred_log, 0, None)).astype(np.float64)
@@ -465,6 +540,10 @@ def main():
     ens_rmsle = rmsle(val_y30_raw[val_idx], ens_val)
     print(f"ENSEMBLE({len(seeds)} seeds) val_rmsle {ens_rmsle:.5f} "
           f"per_seed {[round(r, 5) for r in per_seed_rmsle]}", flush=True)
+    cal_cost = float(np.mean(cal_secs)) if cal_secs else 0.0
+    if cal_secs:
+        print(f"es_metric=cal cost: {len(cal_secs)} calibrations, "
+              f"mean {cal_cost:.3f}s, total {sum(cal_secs):.1f}s", flush=True)
 
     if args.smoke:
         import resource
@@ -483,6 +562,7 @@ def main():
              f"trunk{args.trunk} "
              f"hurdle bce_w{args.bce_w} aux{args.aux_w} "
              f"do{args.dropout} b{args.batch} lr{args.lr:g} wd{args.wd:g} ep{args.epochs} "
+             f"eval_every={eval_every} es={args.es_metric} "
              f"seeds={','.join(map(str, seeds))} best_steps={best_steps} "
              f"per_seed={[round(r, 5) for r in per_seed_rmsle]} {args.notes}").strip()
     log_score(name, float(ens_rmsle), notes)
@@ -511,11 +591,24 @@ def main():
         test_x = open_x(TEST_ANCHOR)
         test_idx = np.arange(N_USERS)
         max2 = args.epochs * len(f_anchors) * math.ceil(N_USERS / args.batch)
+        # Переобучение без ранней остановки шло ФИКСИРОВАННОЙ длины и игнорировало
+        # найденную на первой фазе точку остановки: при best_step 492-1968 оно
+        # прогоняло 3321 шаг, то есть тестовая модель обучалась в 1.7-6.7 раза
+        # дольше валидационно-оптимальной. Бустинг у нас так не делает — там число
+        # итераций масштабируется от найденного оптимума тем же множителем.
+        row_ratio = len(f_anchors) / max(len(p1_anchors), 1)
+        iter_mult = 1.0 + 0.7 * (row_ratio - 1.0)
         test_sum = None
-        for seed in seeds:
+        for si, seed in enumerate(seeds):
+            steps_cap = max2
+            if args.retrain_from_best and best_steps:
+                bs = best_steps[si] if si < len(best_steps) else best_steps[-1]
+                steps_cap = min(max2, max(1, int(round(bs * iter_mult))))
+                print(f"[p2 seed {seed}] шагов {steps_cap} вместо {max2} "
+                      f"(best_step {bs} x {iter_mult:.4f})", flush=True)
             model2, _, _, _, steps2 = run_train(
                 args, device, seed, d_tab, xs2, tabs2, ylogs2, ybuys2,
-                max_steps=max2, epochs=args.epochs, val=None, label="p2")
+                max_steps=steps_cap, epochs=args.epochs, val=None, label="p2")
             t_log = predict_log(model2, test_x, test_tab, test_idx, device, args.eval_batch)
             t_raw = np.expm1(np.clip(t_log, 0, None)).astype(np.float64)
             test_sum = t_raw if test_sum is None else test_sum + t_raw
@@ -529,7 +622,9 @@ def main():
 
     print(json.dumps({"name": name, "val_rmsle": round(float(ens_rmsle), 6),
                       "per_seed": [round(float(r), 6) for r in per_seed_rmsle],
-                      "best_steps": best_steps, "test_saved": test_saved}), flush=True)
+                      "best_steps": best_steps, "test_saved": test_saved,
+                      "es_metric": args.es_metric,
+                      "cal_secs_per_eval": round(cal_cost, 3)}), flush=True)
 
 
 if __name__ == "__main__":
