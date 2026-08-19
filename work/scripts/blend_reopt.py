@@ -48,7 +48,15 @@ from exp_lib import log_score, save_preds  # noqa: E402
 EXCL_SUBSTR = ("smoke", "probe", "cand", "applied", "hjit", "path")
 # derived files (blends / gates over blends): including them is circular
 BLEND_LIKE = {"blend_w1a", "blend_w2", "caruana_v1", "my26", "my27",
-              "base_best", "whale_final"}
+              "base_best", "whale_final", "stack_meta"}
+# префиксы производных файлов: их нельзя класть в библиотеку как «модель», иначе
+# оптимизатор выбирает готовый бленд с весом 1.0 и переоптимизации не происходит
+BLEND_PREFIX = ("blend", "caruana", "lbmix", "stack")
+
+
+def is_blend_like(n: str) -> bool:
+    base = n[: -len("_cal")] if n.endswith("_cal") else n
+    return n in BLEND_LIKE or base in BLEND_LIKE or n.startswith(BLEND_PREFIX)
 
 OLD_ERA = {"lgblog_final", "xgblog_final", "mlp_final", "gru_final"}
 # val preds contain a post-hoc transform fitted on val targets (24 bin shifts /
@@ -199,9 +207,9 @@ def main():
         T[n] = np.log1p(np.clip(dt["pred"].to_numpy().astype(np.float64), 0, None))
         solo[n] = rmsle(y, np.expm1(P[n]))
 
-    cal = [n for n in names if n.endswith(CAL_SUFFIX)]
+    cal = [n for n in names if n.endswith(CAL_SUFFIX) and not is_blend_like(n)]
     old = [n for n in names if n in OLD_ERA]
-    der = [n for n in names if n in BLEND_LIKE]
+    der = [n for n in names if is_blend_like(n)]
     base = [n for n in names if n not in set(cal) | set(old) | set(der)]
 
     LIBS = {
