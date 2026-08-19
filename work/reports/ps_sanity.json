@@ -1,0 +1,59 @@
+{
+ "name": "ps_sanity",
+ "teacher": "log1p() - 0.1163",
+ "pseudo_weight": 0.4,
+ "n_pseudo": 250000,
+ "n_real": 250000,
+ "anchors": [
+  "2025-12-10"
+ ],
+ "n_trees": 20,
+ "chunk_real": 10,
+ "chunk_mix": 10,
+ "params": {
+  "objective": "tweedie",
+  "tweedie_variance_power": 1.45,
+  "learning_rate": 0.04,
+  "num_leaves": 255,
+  "min_data_in_leaf": 300,
+  "feature_fraction": 0.75,
+  "bagging_fraction": 0.8,
+  "bagging_freq": 1,
+  "lambda_l2": 5.0,
+  "max_bin": 127,
+  "verbosity": -1,
+  "num_threads": 2
+ },
+ "seed": 42,
+ "val_raw": 1.8014390001980158,
+ "cal_holdout_final": 1.6802090942398678,
+ "curve": [
+  {
+   "trees": 10,
+   "phase": "real",
+   "val_raw_full": 1.9746410946969857,
+   "holdout_raw": 1.9763348347923475,
+   "holdout_cal": 1.682884256658639,
+   "mean_lp": 2.3766760335570942,
+   "sd_lp": 0.5482406998848014
+  },
+  {
+   "trees": 20,
+   "phase": "mix",
+   "val_raw_full": 1.8014390001980158,
+   "holdout_raw": 1.8033056126291447,
+   "holdout_cal": 1.6802090942398678,
+   "mean_lp": 2.2990947084898115,
+   "sd_lp": 0.949079324516316
+  }
+ ],
+ "best": {
+  "trees": 20,
+  "phase": "mix",
+  "val_raw_full": 1.8014390001980158,
+  "holdout_raw": 1.8033056126291447,
+  "holdout_cal": 1.6802090942398678,
+  "mean_lp": 2.2990947084898115,
+  "sd_lp": 0.949079324516316
+ }
+}

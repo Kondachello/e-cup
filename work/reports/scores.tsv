@@ -152,3 +152,6 @@ bagged_pre24	1.683916	PRELIM light 2-thread: bagged 3x250k pool24, no direct con
 bagged_pre_direct14	1.693684	PRELIM paired control: standard stacked 14 anchors 3.5M rows, 203 feats, 1500t cap, seed42
 bagged_pre24_n1	1.689830	PRELIM single bag (= bag0 of bagged_pre24) for calibrated N-scaling
 bagged_pre14	1.690667	PRELIM mechanism arm: bagged 3x250k on the SAME 14 slices as the standard model
+gls_tiny	1.717786	TINY sanity 1 anchor 40 trees; base=1.719079 d_raw=-0.001294; cal_holdout=1.680209
+gls_smoke	1.702950	SMOKE 2 anchors 400 trees MSE-on-log + GLS weights vs identical unweighted; base=1.701131 d_raw=+0.001819; cal gls=1.674517 base=1.673527 d_cal=+0.000990
+pseudo_base	1.696564	pseudo teacher=none w=0.0 sched(real50/mix50) 3sl 400t gap30; cal_holdout=1.674008
