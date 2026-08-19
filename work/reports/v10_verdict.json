@@ -1,0 +1,21 @@
+{
+ "models": {
+  "twl_v10": {
+   "raw": 1.694074,
+   "cal": 1.669943,
+   "mean_logpred": 2.5034,
+   "sd_logpred": 1.6406
+  },
+  "twl_v10ctl": {
+   "raw": 1.694804,
+   "cal": 1.6701,
+   "mean_logpred": 2.51,
+   "sd_logpred": 1.6356
+  }
+ },
+ "delta_raw": -0.00073,
+ "delta_cal": -0.000157,
+ "helps": true,
+ "above_noise_floor": false,
+ "verdict": "NOISE (|delta| <= 0.001)"
+}

@@ -157,4 +157,30 @@ gls_smoke	1.702950	SMOKE 2 anchors 400 trees MSE-on-log + GLS weights vs identic
 pseudo_base	1.696564	pseudo teacher=none w=0.0 sched(real50/mix50) 3sl 400t gap30; cal_holdout=1.674008
 gls_tw_smoke	1.699890	SMOKE 2 anchors 400 trees champion tweedie-on-log + GLS weights vs identical unweighted; base=1.697098 d_raw=+0.002792; cal_holdout=1.672388
 c_ts2_s7	1.692363	lgb/two_stage
-gls_rev_smoke	1.695607	SMOKE MIRROR: w = v^+0.5 (upweight the UNCERTAIN rows) on champion tweedie; tests whether the unweighted metric wants capacity where the error lives; base=1.697098 d_raw=-0.001491; cal_holdout=1.672142
+gls_rev_smoke	1.695607	SMOKE MIRROR: w = v^+0.5 (upweight the UNCERTAIN rows) on champion tweedie; tests whether the unweighted metric wants capacity where the error lives; base=1.697098 d_raw=-0.001491; cal_holdout=1.680209
+ps_sanity4	1.818017	pseudo teacher=none w=0.0 sched(real10/mix10) 1sl 20t gap30; cal_holdout=1.679613
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+c_ts2_avg_cal	1.668111	binned log-shift calibration of c_ts2_avg; cal_holdout=1.671696
+gls_tiny2_pw-0.5	1.720172	TINY full-path validation of the multi-arm sweep incl. retrain+test; pw=-0.5 it=40; base=1.719079 d_raw=+0.001092; cal arm=1.676176 base=1.676297 d_cal=-0.000121
+gls_tiny2_pw1	1.717786	TINY full-path validation of the multi-arm sweep incl. retrain+test; pw=1 it=40; base=1.719079 d_raw=-0.001294; cal_holdout=1.672142
+mlpziln_b	1.676116	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=2024,555,99 14anch ep=[1, 9, 8]
+stack_meta	1.665982	varying-coefficient meta-stack: 22 cal models + top5 x 12 user feats (83 terms, ridge a=0.0003); honest OOF(5f by user) 1.665982 vs linear NNLS 1.666792; best cal_holdout=1.683110 @10t; WARNING trained on teacher preds -- do NOT drop into the *_cal blend pool blindly (circular with the teacher)
+v10_smoke	1.699094	PIPELINE SMOKE ONLY (60 trees, 2 anchors) - not a real score
+mlpziln_c	1.675688	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=3407,13,777 14anch ep=[6, 3, 10]
+twl_v10	1.694074	twl champion cfg + v10 per-channel funnel tier (56 feats), 8 anchors, identical to twl_v10ctl except USE_V10
+twl_v10ctl	1.694804	CONTROL for twl_v10: identical cfg/seed/anchors, v2/v3/v4 WITHOUT v10 tier
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+c_ts2_avg_cal	1.668111	binned log-shift calibration of c_ts2_avg; holdout 1.692766->1.668629
+fusion_avg_cal	1.668255	binned log-shift calibration of fusion_avg; holdout 1.692988->1.668527
+mlpziln_avg_cal	1.668387	binned log-shift calibration of mlpziln_avg; holdout 1.676375->1.668823
+gls_tw_pw-0.5	1.692633	variance-weighted champion tweedie, 14 anchors gap30; pw<0 = mirror (upweight uncertain rows, PASSED smoke), pw=1 = GLS proper (FAILED smoke); paired unweighted control; pw=-0.5 it=325; base=1.693684 d_raw=-0.001050; cal arm=1.669724 base=1.669675 d_cal=+0.000049
+gls_tw_pw-1	1.693053	variance-weighted champion tweedie, 14 anchors gap30; pw<0 = mirror (upweight uncertain rows, PASSED smoke), pw=1 = GLS proper (FAILED smoke); paired unweighted control; pw=-1 it=149; base=1.693684 d_raw=-0.000631; cal arm=1.670016 base=1.669675 d_cal=+0.000341
+gls_tw_pw1	1.695501	variance-weighted champion tweedie, 14 anchors gap30; pw<0 = mirror (upweight uncertain rows, PASSED smoke), pw=1 = GLS proper (FAILED smoke); paired unweighted control; pw=1 it=356; base=1.693684 d_raw=+0.001818; cal arm=1.669976 base=1.669675 d_cal=+0.000301
+twl_a14	1.693684	число срезов 14 из 23 доступных чистых; 23 включает три февральских 2025, чьё целевое окно содержит 8 марта; всё прочее идентично
+twl_a20	1.690114	число срезов 20 из 23 доступных чистых; 23 включает три февральских 2025, чьё целевое окно содержит 8 марта; всё прочее идентично
+twl_aall	1.689797	число срезов 23 из 23 доступных чистых; 23 включает три февральских 2025, чьё целевое окно содержит 8 марта; всё прочее идентично
+febspec2	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
+febspec2_cal	1.770665	binned log-shift calibration of febspec2; holdout 1.782185->1.768060
