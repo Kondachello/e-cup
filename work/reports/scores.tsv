@@ -155,3 +155,6 @@ bagged_pre14	1.690667	PRELIM mechanism arm: bagged 3x250k on the SAME 14 slices 
 gls_tiny	1.717786	TINY sanity 1 anchor 40 trees; base=1.719079 d_raw=-0.001294; cal_holdout=1.680209
 gls_smoke	1.702950	SMOKE 2 anchors 400 trees MSE-on-log + GLS weights vs identical unweighted; base=1.701131 d_raw=+0.001819; cal gls=1.674517 base=1.673527 d_cal=+0.000990
 pseudo_base	1.696564	pseudo teacher=none w=0.0 sched(real50/mix50) 3sl 400t gap30; cal_holdout=1.674008
+gls_tw_smoke	1.699890	SMOKE 2 anchors 400 trees champion tweedie-on-log + GLS weights vs identical unweighted; base=1.697098 d_raw=+0.002792; cal_holdout=1.672388
+c_ts2_s7	1.692363	lgb/two_stage
+gls_rev_smoke	1.695607	SMOKE MIRROR: w = v^+0.5 (upweight the UNCERTAIN rows) on champion tweedie; tests whether the unweighted metric wants capacity where the error lives; base=1.697098 d_raw=-0.001491; cal_holdout=1.672142

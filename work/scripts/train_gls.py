@@ -203,8 +203,10 @@ def main():
     ap.add_argument("--floor-pct", type=float, default=5.0)
     ap.add_argument("--wcap", type=float, default=0.0,
                     help="cap weights at WCAP * median(w) before normalisation (0 = off)")
-    ap.add_argument("--w-power", type=float, default=1.0,
-                    help="w = v^-POWER; 1.0 = textbook GLS, 0.5 = damped")
+    ap.add_argument("--w-power", type=str, default="1.0",
+                    help="w = v^-POWER; 1.0 = textbook GLS, 0.5 = damped, negative = mirror "
+                         "(upweight the uncertain rows). Comma list sweeps several arms; "
+                         "stages 1-2 are shared so each extra arm costs only one fit.")
     ap.add_argument("--cf-cap-iter", type=int, default=0,
                     help="cap cross-fit trees (smoke: keep = --params n_estimators)")
     ap.add_argument("--seed", type=int, default=42)
@@ -219,6 +221,7 @@ def main():
         os.environ["OMP_NUM_THREADS"] = str(args.threads)
     params = json.loads(args.params)
     var_params = json.loads(args.var_params)
+    powers = [float(s) for s in args.w_power.split(",") if s.strip()]
     t0 = time.time()
 
     pool = eligible_anchors(args.gap_days)
@@ -274,23 +277,31 @@ def main():
           f"p95={res['stage2']['v_p95']:.3f} spearman(v, r2_oof)={res['stage2']['sp_v_r2']:.3f} "
           f"[{time.time()-t2:.0f}s]", flush=True)
 
-    # ---- stage 3: weighted refit ----------------------------------------------------
-    w, wstats = gls_weights(v_tr, args.floor_pct, args.wcap, args.w_power)
-    wstats["power"] = args.w_power
-    res["weights"] = wstats
-    print(f"[weights] floor={wstats['floor']:.4f} p1={wstats['w_p1']:.3f} "
-          f"p50={wstats['w_p50']:.3f} p99={wstats['w_p99']:.3f} max={wstats['w_max']:.3f} "
-          f"ess={wstats['ess_frac']:.3f}", flush=True)
-    t3 = time.time()
-    m_gls, it_gls = fit_lgb(X, ylog, w, Xv, yv_log, dict(params), "log_mse", args.seed)
-    lp_gls = np.clip(m_gls.predict(Xv), 0, None)
-    pv_gls = np.expm1(lp_gls)
-    raw_gls = rmsle(yv_raw, pv_gls)
-    hraw_gls, hcal_gls = cal_holdout(lp_gls, yv_log, yv_raw, half)
-    res["gls"] = dict(raw=raw_gls, holdout_raw=hraw_gls, holdout_cal=hcal_gls,
-                      iters=int(it_gls), secs=round(time.time() - t3))
-    print(f"[gls] raw={raw_gls:.6f} holdout raw={hraw_gls:.6f} cal={hcal_gls:.6f} "
-          f"it={it_gls} [{time.time()-t3:.0f}s]", flush=True)
+    # ---- stage 3: weighted refit (one arm per weight exponent) -----------------------
+    # Sweeping the exponent is nearly free: stages 1-2 dominate the cost and are shared.
+    # power > 0 is GLS proper (downweight the uncertain); power < 0 is the mirror.
+    arms = []  # (power, arm_name, lp, raw, hcal, iters)
+    for pw in powers:
+        w, wstats = gls_weights(v_tr, args.floor_pct, args.wcap, pw)
+        wstats["power"] = pw
+        arm = args.name if len(powers) == 1 else f"{args.name}_pw{pw:g}"
+        res.setdefault("weights", {})[f"pw{pw:g}"] = wstats
+        print(f"[weights pw={pw:g}] floor={wstats['floor']:.4f} p1={wstats['w_p1']:.3f} "
+              f"p50={wstats['w_p50']:.3f} p99={wstats['w_p99']:.3f} max={wstats['w_max']:.3f} "
+              f"ess={wstats['ess_frac']:.3f}", flush=True)
+        t3 = time.time()
+        m_gls, it_gls = fit_lgb(X, ylog, w, Xv, yv_log, dict(params), "log_mse", args.seed)
+        lp = np.clip(m_gls.predict(Xv), 0, None)
+        raw = rmsle(yv_raw, np.expm1(lp))
+        hraw, hcal = cal_holdout(lp, yv_log, yv_raw, half)
+        res[f"gls_pw{pw:g}"] = dict(name=arm, raw=raw, holdout_raw=hraw, holdout_cal=hcal,
+                                    iters=int(it_gls), secs=round(time.time() - t3))
+        print(f"[gls pw={pw:g}] raw={raw:.6f} holdout raw={hraw:.6f} cal={hcal:.6f} "
+              f"it={it_gls} [{time.time()-t3:.0f}s]", flush=True)
+        arms.append((pw, arm, lp, raw, hcal, int(it_gls)))
+        del m_gls
+    res["gls"] = res[f"gls_pw{powers[0]:g}"]  # primary arm
+    pw0, name0, lp_gls, raw_gls, hcal_gls, it_gls = arms[0]
 
     # ---- paired control: identical config, no weights --------------------------------
     lp_base = it_base = None
@@ -305,9 +316,14 @@ def main():
         res["delta"] = dict(raw=raw_gls - raw_b, holdout_raw=hraw_gls - hraw_b,
                             cal=hcal_gls - hcal_b,
                             err_corr=float(np.corrcoef(lp_gls - yv_log, lp_base - yv_log)[0, 1]))
-        print(f"[base] raw={raw_b:.6f} holdout raw={hraw_b:.6f} cal={hcal_b:.6f} it={it_base}\n"
-              f"[DELTA] raw={raw_gls-raw_b:+.6f} cal={hcal_gls-hcal_b:+.6f} "
-              f"(negative = GLS better) [{time.time()-t4:.0f}s]", flush=True)
+        print(f"[base] raw={raw_b:.6f} holdout raw={hraw_b:.6f} cal={hcal_b:.6f} it={it_base}",
+              flush=True)
+        for pw, arm, lp, raw, hcal, _it in arms:
+            res[f"gls_pw{pw:g}"]["d_raw"] = raw - raw_b
+            res[f"gls_pw{pw:g}"]["d_cal"] = hcal - hcal_b
+            print(f"[DELTA pw={pw:g}] raw={raw-raw_b:+.6f} cal={hcal-hcal_b:+.6f} "
+                  f"(negative = weighted better)", flush=True)
+        print(f"[base] done [{time.time()-t4:.0f}s]", flush=True)
         save_preds(args.name + "_direct", "val", uid_val, np.expm1(lp_base))
         del m_b
 
@@ -323,20 +339,22 @@ def main():
               f"mean_logy={r['mean_logy']:.2f} realised_mse={r['mse']:.2f}"
               + (f" rec_order={r['rec_order']:.0f}" if "rec_order" in r else ""), flush=True)
 
-    save_preds(args.name, "val", uid_val, pv_gls)
-    note = args.notes or (f"GLS 1/v weights, {len(anchors)} anchors gap{args.gap_days} "
-                          f"folds={args.folds} floor_p{args.floor_pct} var={args.var_objective} "
-                          f"it={it_gls}")
-    if "delta" in res:
-        note += (f"; base={res['base']['raw']:.6f} d_raw={res['delta']['raw']:+.6f}"
-                 f"; cal gls={hcal_gls:.6f} base={res['base']['holdout_cal']:.6f} "
-                 f"d_cal={res['delta']['cal']:+.6f}")
-    log_score(args.name, raw_gls, note)
+    for pw, arm, lp, raw, hcal, _it in arms:
+        save_preds(arm, "val", uid_val, np.expm1(lp))
+        note = (args.notes or f"v^-{pw:g} weights, {len(anchors)} anchors gap{args.gap_days} "
+                              f"folds={args.folds} floor_p{args.floor_pct} var={args.var_objective}")
+        note += f"; pw={pw:g} it={_it}"
+        if "base" in res:
+            note += (f"; base={res['base']['raw']:.6f} d_raw={raw-res['base']['raw']:+.6f}"
+                     f"; cal arm={hcal:.6f} base={res['base']['holdout_cal']:.6f} "
+                     f"d_cal={hcal-res['base']['holdout_cal']:+.6f}")
+        log_score(arm, raw, note)
     out = Path(__file__).resolve().parents[1] / "reports" / f"{args.name}.json"
     out.write_text(json.dumps({"results": res, "params": params, "var_params": var_params,
                                "anchors": [a.isoformat() for a in anchors],
                                "n_anchors": len(anchors), "folds": args.folds,
-                               "floor_pct": args.floor_pct, "seed": args.seed},
+                               "powers": powers, "floor_pct": args.floor_pct,
+                               "seed": args.seed},
                               indent=1, default=str))
     print(f"[JSON] {out}", flush=True)
 
@@ -357,17 +375,20 @@ def main():
     del X, ylog, Xe, ye
     # v(x) for the new rows comes from the same stage-2 model (out-of-sample for them)
     v_all = np.concatenate([v_tr, predict_var(vm, vobj, Xall[len(v_tr):])])
-    w_all, _ = gls_weights(v_all, args.floor_pct, args.wcap, args.w_power)
     test = load_anchor(TEST_ANCHOR)
     Xt = test.select(cols).to_numpy().astype(np.float32)
     uid_t = test["user_id"].to_numpy()
     del test
     print(f"[retrain] row_ratio={row_ratio:.3f} iter_mult={iter_mult:.3f}", flush=True)
 
-    pf = dict(params); pf["n_estimators"] = max(50, int(it_gls * iter_mult))
-    mf, _ = fit_lgb(Xall, yall, w_all, None, None, pf, "log_mse", args.seed)
-    save_preds(args.name, "test", uid_t, np.expm1(np.clip(mf.predict(Xt), 0, None)))
-    del mf
+    for pw, arm, _lp, _raw, _hcal, it_arm in arms:
+        w_all, _ = gls_weights(v_all, args.floor_pct, args.wcap, pw)
+        pf = dict(params); pf["n_estimators"] = max(50, int(it_arm * iter_mult))
+        mf, _ = fit_lgb(Xall, yall, w_all, None, None, pf, "log_mse", args.seed)
+        save_preds(arm, "test", uid_t, np.expm1(np.clip(mf.predict(Xt), 0, None)))
+        print(f"  [retrain pw={pw:g}] {arm} n_estimators={pf['n_estimators']} "
+              f"[{time.time()-t0:.0f}s]", flush=True)
+        del mf
     if args.direct_baseline:
         pb = dict(params); pb["n_estimators"] = max(50, int(it_base * iter_mult))
         mb, _ = fit_lgb(Xall, yall, None, None, None, pb, "log_mse", args.seed)

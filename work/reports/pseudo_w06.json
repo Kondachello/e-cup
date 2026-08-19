@@ -1,0 +1,115 @@
+{
+ "name": "pseudo_w06",
+ "teacher": "log1p() - 0.1163",
+ "pseudo_weight": 0.6,
+ "n_pseudo": 250000,
+ "n_real": 750000,
+ "anchors": [
+  "2025-11-26",
+  "2025-12-03",
+  "2025-12-10"
+ ],
+ "n_trees": 400,
+ "chunk_real": 50,
+ "chunk_mix": 50,
+ "params": {
+  "objective": "tweedie",
+  "tweedie_variance_power": 1.45,
+  "learning_rate": 0.04,
+  "num_leaves": 255,
+  "min_data_in_leaf": 300,
+  "feature_fraction": 0.75,
+  "bagging_fraction": 0.8,
+  "bagging_freq": 1,
+  "lambda_l2": 5.0,
+  "max_bin": 127,
+  "verbosity": -1,
+  "num_threads": 2
+ },
+ "seed": 42,
+ "val_raw": 1.685184616034786,
+ "cal_holdout_final": 1.6721417348996628,
+ "curve": [
+  {
+   "trees": 50,
+   "phase": "real",
+   "val_raw_full": 1.7046097171157961,
+   "holdout_raw": 1.7056741503846684,
+   "holdout_cal": 1.6758219763341837,
+   "mean_lp": 2.4857584517442324,
+   "sd_lp": 1.4137760236622374
+  },
+  {
+   "trees": 100,
+   "phase": "mix",
+   "val_raw_full": 1.6826312968716886,
+   "holdout_raw": 1.6829251242785213,
+   "holdout_cal": 1.6729728933494146,
+   "mean_lp": 2.3679405546250636,
+   "sd_lp": 1.6574556435178625
+  },
+  {
+   "trees": 150,
+   "phase": "real",
+   "val_raw_full": 1.6846267839271702,
+   "holdout_raw": 1.684721411087941,
+   "holdout_cal": 1.6721409369694453,
+   "mean_lp": 2.3754593642294917,
+   "sd_lp": 1.6975742177402349
+  },
+  {
+   "trees": 200,
+   "phase": "mix",
+   "val_raw_full": 1.6838072642920376,
+   "holdout_raw": 1.6838175940310431,
+   "holdout_cal": 1.6717751327965107,
+   "mean_lp": 2.3642138845431027,
+   "sd_lp": 1.7046496779634381
+  },
+  {
+   "trees": 250,
+   "phase": "real",
+   "val_raw_full": 1.6850117476698572,
+   "holdout_raw": 1.6849972421969714,
+   "holdout_cal": 1.6721824315832736,
+   "mean_lp": 2.3614057264690795,
+   "sd_lp": 1.716522330438032
+  },
+  {
+   "trees": 300,
+   "phase": "mix",
+   "val_raw_full": 1.684414112120817,
+   "holdout_raw": 1.6843212991703722,
+   "holdout_cal": 1.6718804038412545,
+   "mean_lp": 2.357720926987501,
+   "sd_lp": 1.7157921669525429
+  },
+  {
+   "trees": 350,
+   "phase": "real",
+   "val_raw_full": 1.6856129084111553,
+   "holdout_raw": 1.6854872884491219,
+   "holdout_cal": 1.6722642212686547,
+   "mean_lp": 2.3545481484640773,
+   "sd_lp": 1.7255850100302432
+  },
+  {
+   "trees": 400,
+   "phase": "mix",
+   "val_raw_full": 1.685184616034786,
+   "holdout_raw": 1.6850443169146896,
+   "holdout_cal": 1.6721417348996628,
+   "mean_lp": 2.3542968012667123,
+   "sd_lp": 1.7222657908188406
+  }
+ ],
+ "best": {
+  "trees": 200,
+  "phase": "mix",
+  "val_raw_full": 1.6838072642920376,
+  "holdout_raw": 1.6838175940310431,
+  "holdout_cal": 1.6717751327965107,
+  "mean_lp": 2.3642138845431027,
+  "sd_lp": 1.7046496779634381
+ }
+}
