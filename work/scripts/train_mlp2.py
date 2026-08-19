@@ -45,6 +45,7 @@ os.environ.setdefault("USE_V3", "1")
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from calibrate import apply_shifts, fit_shifts
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
@@ -93,6 +94,29 @@ def anchor_heights(anchors) -> list[int]:
     ]
 
 
+def cal_rmsle_2fold(pred_log: np.ndarray, ly: np.ndarray, y_raw: np.ndarray,
+                    half: np.ndarray, bins: int):
+    """Honest calibrated val RMSLE of a checkpoint -> (pooled, single_fold).
+
+    Copy of train_fusion3.cal_rmsle_2fold.  Same transform as calibrate.py
+    (fit_shifts / apply_shifts imported from it), but the shift table is never
+    applied to the rows it was fitted on: half A fits the shifts that score half B
+    and vice versa, so no row is calibrated by itself.  `pooled` scores all rows
+    that way (the criterion actually used); `single_fold` is only the B half, i.e.
+    exactly the number calibrate.py prints as `holdout`.  Both folds are honest, so
+    using both is the same estimator with half the variance — which matters here,
+    because the differences being resolved are ~1e-4.
+    """
+    lp = np.clip(np.asarray(pred_log, dtype=np.float64), 0, None)
+    out = np.empty_like(lp)
+    c_a, s_a = fit_shifts(lp[half], ly[half], bins)
+    out[~half] = apply_shifts(lp[~half], c_a, s_a)
+    c_b, s_b = fit_shifts(lp[~half], ly[~half], bins)
+    out[half] = apply_shifts(lp[half], c_b, s_b)
+    return (rmsle(y_raw, np.expm1(out)),
+            rmsle(y_raw[~half], np.expm1(out[~half])))
+
+
 def build_model(d_in: int, hidden: list[int], dropout: float):
     import torch.nn as nn
 
@@ -129,9 +153,15 @@ def predict_log(model, X: np.ndarray, device: str, bs: int = 65536) -> np.ndarra
     return np.concatenate(outs)
 
 
-def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag=""):
+def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag="",
+              es_cal=None):
     """One hurdle-MLP fit. With Xv: early stop on val rmsle, return best-epoch
-    model. Without Xv: fixed `epochs` run (cosine compressed to that length)."""
+    model. Without Xv: fixed `epochs` run (cosine compressed to that length).
+
+    es_cal (from --es-metric cal) swaps the early-stopping CRITERION for the
+    honest calibrated val RMSLE; it never touches training itself — same seeds,
+    same batches, same steps, same RNG streams, it only decides which epoch's
+    checkpoint is kept and when patience runs out."""
     import torch
     import torch.nn.functional as F
     torch.manual_seed(seed)
@@ -181,16 +211,25 @@ def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag="
             continue
         pred_log = predict_log(model, Xv, device).astype(np.float64)
         score = float(np.sqrt(np.mean((np.clip(pred_log, 0, None) - ylv) ** 2)))
+        crit, extra = score, ""
+        if es_cal is not None:
+            tc = time.time()
+            vc, vc1 = cal_rmsle_2fold(pred_log, es_cal["ly"], es_cal["y"],
+                                      es_cal["half"], es_cal["bins"])
+            dt = time.time() - tc
+            es_cal["secs"].append(dt)
+            crit = vc
+            extra = f" | CAL {vc:.5f} (holdout {vc1:.5f}, +{dt:.2f}s)"
         mark = ""
-        if score < best - 1e-5:
-            best, best_epoch, bad = score, ep, 0
+        if crit < best - 1e-5:
+            best, best_epoch, bad = crit, ep, 0
             best_state = {k: v.detach().cpu().clone()
                           for k, v in model.state_dict().items()}
             mark = " *"
         else:
             bad += 1
         print(f"{tag}ep {ep} bce {tr_bce:.5f} mse_pos {tr_mse:.5f} "
-              f"val_rmsle {score:.5f}{mark}", flush=True)
+              f"val_rmsle {score:.5f}{extra}{mark}", flush=True)
         if out_of_budget:
             print(f"{tag}step budget {max_steps} reached at ep {ep}", flush=True)
             break
@@ -198,6 +237,11 @@ def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag="
             print(f"{tag}early stop at ep {ep} (best {best:.5f} @ ep {best_epoch})",
                   flush=True)
             break
+    else:
+        if Xv is not None:
+            print(f"{tag}БЮДЖЕТ ЭПОХ ИСЧЕРПАН: прошли все {epochs} эпох, ранняя "
+                  f"остановка не сработала (best {best:.5f} @ ep {best_epoch}) — "
+                  f"оптимум может лежать дальше, нужен больший --epochs", flush=True)
     if Xv is None:
         return model, epochs, None
     model.load_state_dict(best_state)
@@ -221,6 +265,18 @@ def main():
     ap.add_argument("--bce-w", type=float, default=0.7)
     ap.add_argument("--hidden", type=str, default="512,256")
     ap.add_argument("--drop-cols", type=str, default="")
+    ap.add_argument("--es-metric", choices=("raw", "cal"), default="raw",
+                    help="early-stopping criterion: raw val RMSLE (default, keeps "
+                         "historical behaviour bit-for-bit) or the honest calibrated "
+                         "one (calibrate.py binned log-shift, 2-fold over users). "
+                         "Every prediction file is calibrated before it reaches a "
+                         "blend, and that rewrites the LEVEL of the forecast, so the "
+                         "raw criterion spends its checkpoint choice on a level that "
+                         "is about to be overwritten for free and pays in RANKING, "
+                         "which calibration preserves")
+    ap.add_argument("--es-bins", type=int, default=24,
+                    help="quantile bins of the --es-metric cal calibration "
+                         "(calibrate.py default is 24; keep them equal)")
     ap.add_argument("--threads", type=int, default=0)
     ap.add_argument("--device", type=str, default="")
     ap.add_argument("--no-test", action="store_true")
@@ -300,10 +356,19 @@ def main():
     pos_rate = float((ylog > 0).mean())
     print(f"train pos_rate={pos_rate:.4f}", flush=True)
 
+    es_cal = None
+    if args.es_metric == "cal":
+        es_cal = {"ly": np.log1p(np.clip(yv_raw, 0, None)), "y": yv_raw,
+                  "half": np.random.default_rng(0).permutation(nv) < nv // 2,
+                  "bins": args.es_bins, "secs": []}
+        print(f"es_metric=cal: early stop on the honest calibrated val RMSLE "
+              f"({args.es_bins} bins, 2-fold over users)", flush=True)
+
     val_preds, best_epochs = [], []
     for seed in seeds:
         m, be, _ = train_one(X, ylog, Xv, ylv, cfg, seed, device, args.epochs,
-                             max_steps=max_steps, tag=f"[s{seed}] ")
+                             max_steps=max_steps, tag=f"[s{seed}] ",
+                             es_cal=es_cal)
         pv = np.expm1(np.clip(predict_log(m, Xv, device), 0, None))
         print(f"[s{seed}] best_epoch={be} val_rmsle={rmsle(yv_raw, pv):.6f}",
               flush=True)
@@ -312,6 +377,10 @@ def main():
         del m
     pv_avg = np.mean(val_preds, axis=0)
     score = rmsle(yv_raw, pv_avg)
+    if es_cal is not None and es_cal["secs"]:
+        print(f"es_metric=cal cost: {len(es_cal['secs'])} calibrations, mean "
+              f"{np.mean(es_cal['secs']):.3f}s, total {sum(es_cal['secs']):.1f}s",
+              flush=True)
 
     if args.smoke:
         print(f"[SMOKE] {args.name} val_rmsle={score:.6f} "
@@ -331,6 +400,8 @@ def main():
         f"hurdle-mlp {args.hidden} bce_w{args.bce_w} do{args.dropout} "
         f"lr{args.lr} bs{args.batch} gap{args.gap_days} seeds={args.seeds} "
         f"{len(tr_anchors)}anch ep={best_epochs}")
+    if args.es_metric != "raw":
+        notes = f"{notes}; es={args.es_metric}"
     log_score(args.name, score, notes)
 
     if args.no_test:
