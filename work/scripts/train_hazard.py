@@ -233,14 +233,16 @@ def fit_models(X, y, Xa, ya, names, args, rng):
         n_estimators=args.trees, learning_rate=args.lr, num_leaves=args.leaves,
         min_child_samples=200, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
         n_jobs=args.threads, random_state=args.seed, verbose=-1)
-    haz.fit(X, y, feature_name=names)
+    haz.fit(X, y)
     amt = lgb.LGBMRegressor(
         n_estimators=max(200, args.trees // 3), learning_rate=args.lr, num_leaves=args.leaves,
         min_child_samples=100, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
         n_jobs=args.threads, random_state=args.seed, verbose=-1)
-    amt.fit(Xa, ya, feature_name=names)
+    amt.fit(Xa, ya)
     resid = ya - amt.predict(Xa)
-    log(f"models fitted; amount residual sd={resid.std():.3f}")
+    top = sorted(zip(names, haz.feature_importances_), key=lambda t: -t[1])[:5]
+    log(f"models fitted; amount residual sd={resid.std():.3f}; "
+        f"top hazard features: {', '.join(n for n, _ in top)}")
     return haz, amt, resid.astype(np.float32)
 
 
@@ -249,7 +251,12 @@ def fit_models(X, y, Xa, ya, names, args, rng):
 
 
 def window_hazards(panel: Panel, haz, anchor_idx: int, horizon: int, threads: int):
-    """h[grid, day] for every user: hazard on each window day at each recency on the grid."""
+    """h[grid, day] for every user: hazard on each window day at each recency on the grid.
+
+    History is frozen at the anchor and only the calendar and the recency clock advance.
+    Verified directly: with d_hist fixed, features() output changes in exactly two columns
+    (dow, season_ly) as d_cal moves across the window.
+    """
     U = panel.U
     grid = np.array(REC_GRID, dtype=np.float32)
     out = np.empty((len(grid), horizon, U), dtype=np.float32)
