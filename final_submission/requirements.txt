@@ -1,43 +1,60 @@
-# E-CUP 2026 Задача 3 — зафиксированные зависимости (Python 3.10, pip freeze).
+# E-CUP 2026 Задача 3 — зафиксированные зависимости (Python 3.10.17).
 # Установка: python3.10 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Версии сверены с `.venv/bin/pip freeze` (расхождений нет, ничего не пропущено).
 # Из freeze исключены только инструменты разработки/визуализации, не участвующие
-# в пайплайне (matplotlib/plotly/graphviz/duckdb/py-spy и их транзитивные зависимости).
+# в пайплайне: matplotlib, plotly, graphviz, duckdb, py-spy и их транзитивные
+# зависимости (contourpy, cycler, fonttools, kiwisolver, pillow, pyparsing,
+# narwhals).
+#
+# ЛИЦЕНЗИИ: все перечисленные пакеты распространяются под пермиссивными
+# лицензиями (MIT / BSD-2/3-Clause / Apache-2.0 / PSF-2.0 / MPL-2.0), которые
+# ДОПУСКАЮТ КОММЕРЧЕСКОЕ ИСПОЛЬЗОВАНИЕ. Copyleft-лицензий (GPL/AGPL/LGPL) нет
+# ни одной. Лицензия указана после каждого пакета; значения взяты из
+# метаданных установленных дистрибутивов (поле License-Expression в
+# *.dist-info/METADATA), а не по памяти.
 
 # --- ядро данных ---
-numpy==2.2.6
-polars==1.43.2
-polars-runtime-32==1.43.2
-pyarrow==25.0.1
-pandas==2.3.3
-python-dateutil==2.9.0.post0
-pytz==2026.3.post1
-tzdata==2026.3
-six==1.17.0
-packaging==26.3
+numpy==2.2.6                    # BSD-3-Clause
+polars==1.43.2                  # MIT
+polars-runtime-32==1.43.2       # MIT
+pyarrow==25.0.1                 # Apache-2.0
+pandas==2.3.3                   # BSD-3-Clause
+python-dateutil==2.9.0.post0    # Apache-2.0 OR BSD-3-Clause (dual)
+pytz==2026.3.post1              # MIT
+tzdata==2026.3                  # Apache-2.0
+six==1.17.0                     # MIT
+packaging==26.3                 # Apache-2.0 OR BSD-2-Clause (dual)
 
 # --- модели: бустинги ---
-lightgbm==4.7.0
-xgboost==3.2.0
+lightgbm==4.7.0                 # MIT
+xgboost==3.2.0                  # Apache-2.0
 
 # --- модели: нейросети (torch + транзитивные) ---
-torch==2.13.0
-filelock==3.32.3
-fsspec==2026.7.0
-Jinja2==3.1.6
-MarkupSafe==3.0.3
-mpmath==1.3.0
-networkx==3.4.2
-sympy==1.14.0
-typing_extensions==4.16.0
+torch==2.13.0                   # BSD-3-Clause (+ Apache-2.0 компоненты)
+filelock==3.32.3                # MIT
+fsspec==2026.7.0                # BSD-3-Clause
+Jinja2==3.1.6                   # BSD-3-Clause
+MarkupSafe==3.0.3               # BSD-3-Clause
+mpmath==1.3.0                   # BSD-3-Clause
+networkx==3.4.2                 # BSD-3-Clause
+sympy==1.14.0                   # BSD-3-Clause
+typing_extensions==4.16.0       # PSF-2.0
 
 # --- признаки v4 (BTYD: BG/NBD + Gamma-Gamma) ---
-Lifetimes==0.11.3
-autograd==1.9.1
-dill==0.4.1
+Lifetimes==0.11.3               # MIT
+autograd==1.9.1                 # MIT
+dill==0.4.1                     # BSD-3-Clause
 
-# --- вспомогательные (калибровка, метрики) ---
-scipy==1.15.3
-scikit-learn==1.7.2
-joblib==1.5.3
-threadpoolctl==3.6.0
-tqdm==4.70.0
+# --- вспомогательные (калибровка, метрики, прогресс) ---
+scipy==1.15.3                   # BSD-3-Clause
+scikit-learn==1.7.2             # BSD-3-Clause
+joblib==1.5.3                   # BSD-3-Clause
+threadpoolctl==3.6.0            # BSD-3-Clause
+tqdm==4.70.0                    # MPL-2.0 AND MIT
+
+# --- опционально ---
+# Нужен ТОЛЬКО для ветки `train_gbdt.py --model cb`. Ни одна модель финального
+# ансамбля на CatBoost не обучена, и инференс его не импортирует, поэтому для
+# воспроизведения сабмита пакет можно не ставить.
+catboost==1.2.10                # Apache-2.0

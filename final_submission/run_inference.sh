@@ -27,5 +27,14 @@ for f in "$OZON_ROOT/train.parquet" "$OZON_ROOT/sample_submit.csv"; do
   [[ -f "$f" ]] || { echo "ОШИБКА: нет входного файла $f"; exit 1; }
 done
 
+# Ранняя проверка: есть ли все веса. Печатает таблицу «модель -> чего не хватает»
+# и останавливается до того, как будут потрачены минуты на построение признаков.
+if ! "$PY" "$HERE/inference.py" --stage check; then
+  echo
+  echo "ОШИБКА: не хватает обученных артефактов (таблица выше)."
+  echo "Команды переобучения: $HERE/reproduce_training.md, раздел 2."
+  exit 1
+fi
+
 time "$PY" "$HERE/inference.py" --stage all
 echo "== Готово: $OUT =="

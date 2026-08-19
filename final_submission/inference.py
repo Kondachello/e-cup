@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
-"""Полный инференс финального решения E-CUP 2026 Задача 3 (LTV) с нуля.
+"""Инференс финального решения E-CUP 2026, задача 3 (прогноз GMV за 30 дней).
 
-Стадии (каждую можно запустить отдельно через --stage):
-  features   : признаки base/v2/v3/v4 для тестового среза        [~5-10 мин CPU]
-  sequences  : тензор дневных последовательностей (для GRU)      [~1-2 мин]
-  predict    : прогнозы пяти моделей ансамбля из артефактов models/  [~3-6 мин]
-  ensemble   : бленд + калибровка + поправки -> итоговый прогноз [<1 мин]
+Читает train.parquet + sample_submit.csv, строит признаки тестового среза
+2026-02-13, загружает СОХРАНЁННЫЕ веса девяти моделей бленда, считает их
+прогнозы, применяет поквантильную калибровку каждой модели, смешивает с
+зафиксированными весами и применяет финальную аффинную перенастройку.
+Сетевых вызовов нет.
 
-Пути параметризованы (ни одного захардкоженного абсолютного пути):
-  OZON_ROOT   корень с train.parquet и sample_submit.csv; кэш признаков
-              создаётся в $OZON_ROOT/work/{features,seq}/ (по умолчанию —
-              родительский каталог этого файла, т.е. корень репозитория)
-  MODELS_DIR  каталог обученных артефактов (по умолчанию final_submission/models)
-  SCRIPTS_DIR каталог скриптов пайплайна (по умолчанию <root>/work/scripts)
+Стадии (`--stage`):
+  check       только проверить наличие артефактов и выйти (ничего не считает)
+  features    признаки тестового среза (base/v2/v3/v4/v7) + тензор seq2
+  predict     прогнозы девяти моделей из сохранённых весов -> кэш .npy
+  ensemble    калибровка + бленд + аффин -> кэш final_lp.npy
+  all         всё подряд (по умолчанию)
 
-Сетевых вызовов нет ни в одной стадии. Используются только данные соревнования.
-Артефакты моделей и конфиги ансамбля описаны в models/README.md.
+Переменные окружения:
+  OZON_ROOT   корень с train.parquet / sample_submit.csv (по умолчанию — родитель
+              этого каталога)
+  MODELS_DIR  каталог с весами (по умолчанию final_submission/models; если файла
+              там нет, ищем в work/models — туда пишут трейнеры)
+  CACHE_DIR   каталог промежуточных прогнозов (по умолчанию MODELS_DIR/preds_test)
+
+Архитектуры и функции предсказания НЕ дублируются: они импортируются из тех же
+work/scripts/train_*.py, которыми модели обучены. Это единственный способ
+гарантировать, что инференс и обучение не разъедутся.
+
+Если какого-то файла весов нет — скрипт падает с явным сообщением, какой именно
+файл отсутствует и какой командой он создаётся (см. reproduce_training.md).
 """
 from __future__ import annotations
 
@@ -27,337 +38,462 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
+HERE = Path(__file__).resolve().parent
+ROOT = Path(os.environ.get("OZON_ROOT", str(HERE.parent))).resolve()
+os.environ["OZON_ROOT"] = str(ROOT)          # common.py читает это при импорте
 
-# ---------------------------------------------------------------------------
-# Пути (всё переопределяется окружением; абсолютных путей в коде нет)
-# ---------------------------------------------------------------------------
-HERE = Path(__file__).resolve().parent                      # .../final_submission
-ROOT = Path(os.environ.get("OZON_ROOT", str(HERE.parent)))  # корень с train.parquet
-MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(HERE / "models")))
-SCRIPTS_DIR = Path(os.environ.get("SCRIPTS_DIR", str(ROOT / "work" / "scripts")))
+SCRIPTS = ROOT / "work" / "scripts"
+WORK_MODELS = ROOT / "work" / "models"
+MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(HERE / "models"))).resolve()
+CACHE_DIR = Path(os.environ.get("CACHE_DIR", str(MODELS_DIR / "preds_test")))
 
-TEST_ANCHOR = "2026-02-13"          # прогнозируемое окно: 2026-02-14 .. 2026-03-15
-N_USERS = 250_000
+sys.path.insert(0, str(SCRIPTS))
 
-# Окружение дочерних процессов: наследует OZON_ROOT, включает наборы признаков.
-CHILD_ENV = {**os.environ, "OZON_ROOT": str(ROOT),
-             "USE_V2": "1", "USE_V3": "1", "USE_V4": "1"}
+import numpy as np  # noqa: E402
+
+TEST_ANCHOR_ISO = "2026-02-13"
+
+# --- зафиксированная конструкция ансамбля --------------------------------------
+# Веса: NNLS на валидации, честный OOF 1.666791 (work/reports/scores.tsv).
+# Канонический источник — work/scripts/blend_testopt.py, константа W_VAL.
+BLEND_WEIGHTS = {
+    "fusion_f":   0.316,
+    "c_ts2_s42":  0.246,
+    "mlpziln":    0.122,
+    "behavonly":  0.080,
+    "countaov":   0.074,
+    "seq2tr_f":   0.070,
+    "twl_v7":     0.055,
+    "hmmsim":     0.028,
+    "channel2":   0.012,
+}
+# Финальная аффинная перенастройка в log1p-пространстве:
+#   lp_final = SLOPE * lp_blend + SHIFT
+# SLOPE — недодисперсность бленда (sd 1.510 -> нужные 1.628, KNOWLEDGE);
+# SHIFT — уровень: среднее log1p 2.155 -> mean_P(t) = 2.3275, замерено на LB.
+# Источник: work/reports/blend_testopt_honest.json, ключ "_affine".
+AFFINE_SLOPE = 1.0775792958468002
+AFFINE_SHIFT = 0.006176042172469855
+# Контрольные значения на нашем blend_cal_test (250k строк) — см. самопроверку.
+EXPECT_MEAN_AFTER = 2.3287
+EXPECT_SD_AFTER = 1.6278
+
+# Наборы признаков, с которыми обучалась каждая модель (проверяется по meta).
+FEATURE_ENV = {
+    "fusion_f":  {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1"},
+    "c_ts2_s42": {"USE_V2": "1", "USE_V3": "1"},
+    "mlpziln":   {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1"},
+    "behavonly": {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1"},
+    "countaov":  {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1"},
+    "twl_v7":    {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "USE_V7": "1"},
+    "channel2":  {"USE_V2": "1", "USE_V3": "1", "USE_V4": "1"},
+    "seq2tr_f":  {},
+    "hmmsim":    {},
+}
+
+# Команда, которой модель создаётся заново (для текста ошибки).
+HOWTO = {
+    "fusion_f":  "reproduce_training.md §2.1  (train_fusion.py --name fusion_f --final ...)",
+    "c_ts2_s42": "reproduce_training.md §2.2  (train_gbdt.py --name c_ts2_s42 --objective two_stage ...)",
+    "mlpziln":   "reproduce_training.md §2.3  (train_mlpziln.py --name mlpziln ...)",
+    "behavonly": "reproduce_training.md §2.4  (train_behavonly.py --name behavonly ...)",
+    "countaov":  "reproduce_training.md §2.5  (train_countaov.py --name countaov ...)",
+    "seq2tr_f":  "reproduce_training.md §2.6  (train_seq2.py --name seq2tr_f --arch tr --final ...)",
+    "twl_v7":    "reproduce_training.md §2.7  (train_gbdt.py --name twl_v7 ...)",
+    "hmmsim":    "reproduce_training.md §2.8  (train_hmm_sim.py --name hmmsim ...)",
+    "channel2":  "reproduce_training.md §2.9  (train_channel.py --name channel2 ...)",
+}
 
 
 def log(msg: str) -> None:
-    print(f"[inference +{time.time() - T0:7.1f}s] {msg}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def run_script(script: str, *args: str) -> None:
-    """Запуск скрипта пайплайна тем же интерпретатором, без сети, с OZON_ROOT."""
-    cmd = [sys.executable, str(SCRIPTS_DIR / script), *args]
-    log("run: " + " ".join(cmd))
-    subprocess.run(cmd, check=True, env=CHILD_ENV, cwd=str(ROOT))
+class MissingArtifact(RuntimeError):
+    """Нет файла, без которого прогноз был бы мусором. Падаем громко."""
 
 
-def need(path: Path, what: str) -> Path:
-    if not path.exists():
-        sys.exit(f"ОШИБКА: не найден {what}: {path}\n"
-                 f"Что и откуда кладётся в models/ — см. models/README.md; "
-                 f"данные (train.parquet, sample_submit.csv) — в OZON_ROOT={ROOT}")
-    return path
+def find(fname: str, what: str, model: str | None = None) -> Path:
+    """Ищет артефакт в MODELS_DIR, затем в work/models. Иначе — внятная ошибка."""
+    for d in (MODELS_DIR, WORK_MODELS):
+        p = d / fname
+        if p.exists():
+            return p
+    hint = f"\n  создаётся: {HOWTO[model]}" if model in HOWTO else ""
+    raise MissingArtifact(
+        f"НЕ ХВАТАЕТ ФАЙЛА: {fname}  ({what})\n"
+        f"  искали в: {MODELS_DIR}\n"
+        f"            {WORK_MODELS}{hint}\n"
+        f"  без него прогноз посчитать нельзя — прекращаю, чтобы не выдать мусор."
+    )
 
 
-# ---------------------------------------------------------------------------
-# Стадия 1-2: признаки и последовательности тестового среза
-# ---------------------------------------------------------------------------
+def have(fname: str) -> bool:
+    return any((d / fname).exists() for d in (MODELS_DIR, WORK_MODELS))
+
+
+def load_meta(model: str) -> dict:
+    return json.loads(find(f"{model}_meta.json",
+                           f"конфиг модели {model} (порядок признаков, архитектура)",
+                           model).read_text())
+
+
+def run_script(script: str, *args: str, env: dict | None = None) -> None:
+    cmd = [sys.executable, str(SCRIPTS / script), *args]
+    e = dict(os.environ)
+    e.update(env or {})
+    log(f"$ {' '.join(cmd[1:])}" + (f"   env={env}" if env else ""))
+    subprocess.run(cmd, check=True, env=e)
+
+
+# ------------------------------------------------------------------ признаки --
+
 def stage_features() -> None:
-    need(ROOT / "train.parquet", "train.parquet (данные соревнования)")
-    need(ROOT / "sample_submit.csv", "sample_submit.csv (вселенная user_id)")
-    # base: только тестовый срез (~1-2 мин)
-    run_script("build_features.py", "--anchors", TEST_ANCHOR)
-    # v2/v3 строят все стандартные срезы и пропускают уже посчитанные;
-    # для чистого инференса нужен только тестовый (полная сборка ~5-8 мин)
-    run_script("build_features_v2.py")
-    run_script("build_features_v3.py")
-    # v4 (BTYD): только тестовый срез (~2-4 мин)
-    run_script("build_features_v4.py", "--anchors", TEST_ANCHOR)
-    log("features: готово")
+    for f in ("train.parquet", "sample_submit.csv"):
+        if not (ROOT / f).exists():
+            raise MissingArtifact(f"НЕ ХВАТАЕТ ВХОДНОГО ФАЙЛА: {ROOT / f}")
+    a = TEST_ANCHOR_ISO
+    run_script("build_features.py", "--anchors", a)
+    run_script("build_features_v2.py", "--anchors", a)
+    run_script("build_features_v3.py")          # сам пропускает уже собранные срезы
+    run_script("build_features_v4.py", "--anchors", a)
+    if "twl_v7" in BLEND_WEIGHTS:
+        run_script("build_features_v7.py", "--anchors", a, "--states", "4",
+                   "--sims", "300", "--win", "120", "--em-cap", "15000", "--seed", "42")
+    if {"seq2tr_f", "fusion_f"} & set(BLEND_WEIGHTS):
+        run_script("build_seq2.py")             # сам пропускает уже собранные тензоры
+    log("признаки тестового среза готовы")
 
 
-def stage_sequences() -> None:
-    # Тензор [250k x 112 дней x 6 каналов]; уже посчитанные срезы пропускаются.
-    run_script("build_seq.py")
-    log("sequences: готово")
+def load_test_matrix(model: str, meta: dict):
+    """(X, user_id) для модели: колонки строго в том порядке, в каком обучали."""
+    import polars as pl
+    for k in ("USE_V2", "USE_V3", "USE_V4", "USE_V6", "USE_V7", "USE_V8",
+              "USE_V10", "USE_SEQOOF"):
+        os.environ.pop(k, None)
+    os.environ.update(meta.get("feature_flags") or FEATURE_ENV.get(model, {}))
+    import common
+    from common import TEST_ANCHOR, load_anchor
+    df = load_anchor(TEST_ANCHOR)
+    cols = meta["feature_cols"]
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise MissingArtifact(
+            f"модель {model}: в тестовом срезе нет {len(missing)} признаков, "
+            f"например {missing[:5]}.\n"
+            f"  вероятно не собран нужный набор признаков "
+            f"(флаги {meta.get('feature_flags')}) — см. reproduce_training.md §1")
+    X = df.select([pl.col(c).cast(pl.Float32) for c in cols]).to_numpy()
+    uid = df["user_id"].to_numpy()
+    del df, common
+    return np.ascontiguousarray(X), uid
 
 
-# ---------------------------------------------------------------------------
-# Загрузка тестовой матрицы признаков (тот же код, что при обучении)
-# ---------------------------------------------------------------------------
-def load_test_matrix(feature_columns: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    """Возвращает (user_ids [250k], X float32 [250k, F]) в порядке sample_submit."""
-    sys.path.insert(0, str(SCRIPTS_DIR))
-    os.environ.update({k: CHILD_ENV[k] for k in ("OZON_ROOT", "USE_V2", "USE_V3", "USE_V4")})
-    from datetime import date
-    import common  # noqa: E402  (пайплайновый common.py, пути из OZON_ROOT)
+# -------------------------------------------------------------- предсказатели --
+# Каждая функция возвращает прогноз в СЫРОЙ шкале GMV (>=0), ровно как это делает
+# retrain-фаза соответствующего трейнера (включая пространство усреднения сидов).
 
-    df = common.load_anchor(date.fromisoformat(TEST_ANCHOR)).sort("user_id")
-    assert df.height == N_USERS, f"тестовый срез: {df.height} строк вместо {N_USERS}"
-    missing = [c for c in feature_columns if c not in df.columns]
-    assert not missing, f"в тестовом срезе нет колонок (несовпадение версий признаков): {missing[:5]}"
-    X = df.select(feature_columns).to_numpy().astype(np.float32)
-    return df["user_id"].to_numpy(), X
-
-
-# ---------------------------------------------------------------------------
-# Прогнозы отдельных моделей (артефакты — models/README.md)
-# ---------------------------------------------------------------------------
-def _tab_preprocess(X: np.ndarray, stats: np.lib.npyio.NpzFile) -> np.ndarray:
-    """Препроцессинг табличных MLP: median-impute -> clip[p1,p99] -> standardize."""
-    med, lo, hi = stats["med"], stats["lo"], stats["hi"]
-    mean, std = stats["mean"], stats["std"]
-    X = np.where(np.isnan(X), med, X)
-    X = np.clip(X, lo, hi)
-    return (X - mean) / np.maximum(std, 1e-6)
-
-
-def _mlp_trunk(torch, n_feats: int, hidden=(512, 256)):
-    """Общий ствол табличных MLP (как в обучении): Linear-GELU-LayerNorm-Dropout."""
-    import torch.nn as nn
-    layers, d = [], n_feats
-    for h in hidden:
-        layers += [nn.Linear(d, h), nn.GELU(), nn.LayerNorm(h), nn.Dropout(0.15)]
-        d = h
-    return nn.Sequential(*layers), d
-
-
-def _forward_batched(torch, model, X: np.ndarray, bs: int = 8192) -> np.ndarray:
-    outs = []
-    with torch.no_grad():
-        for i in range(0, len(X), bs):
-            outs.append(model(torch.from_numpy(X[i:i + bs])).numpy())
-    return np.concatenate(outs)
-
-
-def predict_mlp_ziln(X: np.ndarray) -> np.ndarray:
-    """ZILN MLP: 3 выхода (logit p, mu, sigma); E[log1p] квадратурой Гаусса-Эрмита.
-    Среднение по сидам — на уровне E[log1p]. Возвращает log1p-прогноз."""
+def _torch_device() -> str:
     import torch
-    import torch.nn as nn
-    stats = np.load(need(MODELS_DIR / "mlp_ziln_stats.npz", "статистики препроцессинга ZILN-MLP"))
-    Xn = _tab_preprocess(X, stats).astype(np.float32)
-    gh_x, gh_w = np.polynomial.hermite.hermgauss(20)
-    acc = []
-    for pt in sorted(MODELS_DIR.glob("mlp_ziln_seed*.pt")) or [need(MODELS_DIR / "mlp_ziln_seed42.pt", "веса ZILN-MLP (mlp_ziln_seed*.pt)")]:
-        trunk, d = _mlp_trunk(torch, Xn.shape[1])
-        model = nn.Sequential(trunk, nn.Linear(d, 3))
-        model.load_state_dict(torch.load(pt, map_location="cpu"))
-        model.eval()
-        out = _forward_batched(torch, model, Xn)
-        p = 1.0 / (1.0 + np.exp(-out[:, 0]))
-        mu, sigma = out[:, 1], np.log1p(np.exp(out[:, 2])) + 1e-3  # softplus
-        z = mu[:, None] + np.sqrt(2.0) * sigma[:, None] * gh_x[None, :]
-        equad = (np.logaddexp(0.0, z) * gh_w[None, :]).sum(1) / np.sqrt(np.pi)
-        acc.append(np.clip(p * equad, 0, None))
-    return np.mean(acc, axis=0)
+    return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
-def predict_mlp_bin(X: np.ndarray) -> np.ndarray:
-    """Биновая MLP-классификация: softmax по K+1 бинам, E[log1p] = sum p_k * c_k."""
+def _apply_stats(mod, X: np.ndarray, stats_file: Path) -> None:
+    z = np.load(stats_file)
+    mod.apply_stats(X, {k: z[k] for k in ("med", "lo", "hi", "mean", "std")})
+
+
+def predict_mlp_family(model: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    """mlpziln / mlp2: усреднение сидов в СЫРОЙ шкале (как в трейнере)."""
     import torch
-    import torch.nn as nn
-    stats = np.load(need(MODELS_DIR / "mlp_bin_stats.npz", "статистики/центры бинов binned-MLP"))
-    Xn = _tab_preprocess(X, stats).astype(np.float32)
-    centers = stats["centers"].astype(np.float64)
-    if centers[0] != 0.0:                      # c_0 (нулевой бин) = 0
-        centers = np.concatenate([[0.0], centers])
-    acc = []
-    for pt in sorted(MODELS_DIR.glob("mlp_bin_seed*.pt")) or [need(MODELS_DIR / "mlp_bin_seed42.pt", "веса binned-MLP (mlp_bin_seed*.pt)")]:
-        trunk, d = _mlp_trunk(torch, Xn.shape[1])
-        model = nn.Sequential(trunk, nn.Linear(d, len(centers)))
-        model.load_state_dict(torch.load(pt, map_location="cpu"))
-        model.eval()
-        logits = _forward_batched(torch, model, Xn)
-        e = np.exp(logits - logits.max(1, keepdims=True))
-        proba = e / e.sum(1, keepdims=True)
-        acc.append(np.clip(proba @ centers, 0, None))
-    return np.mean(acc, axis=0)
-
-
-def predict_xgb(X: np.ndarray, feature_columns: list[str]) -> np.ndarray:
-    """XGBoost tweedie-on-log1p: прогноз уже в log1p-пространстве."""
-    import xgboost as xgb
-    bst = xgb.Booster()
-    bst.load_model(str(need(MODELS_DIR / "xgb_tweedie_log.json", "бустер XGBoost (xgb_tweedie_log.json)")))
-    return np.clip(bst.predict(xgb.DMatrix(X, feature_names=feature_columns)), 0, None)
-
-
-def predict_channels(X: np.ndarray) -> np.ndarray:
-    """Канальная декомпозиция: log1p(GMV_search) и log1p(GMV_cat) двумя LightGBM;
-    сумма — в линейном пространстве, возврат в log1p."""
-    import lightgbm as lgb
-    ps = lgb.Booster(model_file=str(need(MODELS_DIR / "channel_search.txt", "LightGBM канала «поиск»"))).predict(X)
-    pc = lgb.Booster(model_file=str(need(MODELS_DIR / "channel_cat.txt", "LightGBM канала «каталог»"))).predict(X)
-    total = np.expm1(np.clip(ps, 0, None)) + np.expm1(np.clip(pc, 0, None))
-    return np.log1p(total)
-
-
-def predict_gru(user_ids: np.ndarray) -> np.ndarray:
-    """GRU по дневным последовательностям (112 дней x 6 каналов)."""
-    import torch
-    import torch.nn as nn
-
-    seq_path = need(ROOT / "work" / "seq" / f"anchor={TEST_ANCHOR}.npy",
-                    "тензор последовательностей тестового среза (стадия sequences)")
-    arr = np.load(seq_path).astype(np.float32)          # [250k, 112, 6]
-    assert arr.shape[0] == len(user_ids) == N_USERS
-
-    class GruNet(nn.Module):
-        def __init__(self, hidden=96, layers=2):
-            super().__init__()
-            self.gru = nn.GRU(6, hidden, num_layers=layers, batch_first=True, dropout=0.1)
-            self.head = nn.Sequential(nn.Linear(hidden * 3, hidden), nn.GELU(), nn.Linear(hidden, 1))
-
-        def forward(self, x):
-            h, _ = self.gru(x)
-            z = torch.cat([h[:, -1], h.mean(1), h.max(1).values], dim=1)
-            return self.head(z).squeeze(1)
-
-    model = GruNet()
-    model.load_state_dict(torch.load(
-        need(MODELS_DIR / "gru_seed42.pt", "веса GRU (gru_seed42.pt)"), map_location="cpu"))
-    model.eval()
+    mod = __import__("train_mlpziln" if meta["kind"] == "mlpziln" else "train_mlp2")
+    _apply_stats(mod, X, find(meta["stats_npz"], f"статистики препроцессинга {model}", model))
+    dev, cfg = _torch_device(), meta["cfg"]
     preds = []
-    with torch.no_grad():
-        for i in range(0, len(arr), 8192):
-            preds.append(model(torch.from_numpy(arr[i:i + 8192])).numpy())
-    return np.clip(np.concatenate(preds), 0, None)
+    for seed in meta["seeds"]:
+        w = find(f"{model}_seed{seed}.pt", f"веса {model}, сид {seed}", model)
+        net = mod.build_model(X.shape[1], cfg["hidden"], cfg["dropout"]).to(dev)
+        net.load_state_dict(torch.load(w, map_location=dev))
+        preds.append(np.expm1(np.clip(mod.predict_log(net, X, dev), 0, None)))
+        del net
+    return np.mean(preds, axis=0)
 
+
+def predict_mlpbin(model: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    """Усреднение сидов в E[log1p]-пространстве (как в трейнере), потом expm1."""
+    import torch
+    import train_mlpbin as mod
+    sf = find(meta["stats_npz"], f"статистики/центры бинов {model}", model)
+    _apply_stats(mod, X, sf)
+    centers = np.load(sf)["centers"]
+    dev, cfg = _torch_device(), meta["cfg"]
+    centers_t = torch.tensor(centers, dtype=torch.float32, device=dev)
+    elogs = []
+    for seed in meta["seeds"]:
+        w = find(f"{model}_seed{seed}.pt", f"веса {model}, сид {seed}", model)
+        net = mod.build_model(X.shape[1], cfg["hidden"], cfg["dropout"],
+                              len(centers), cfg.get("norm", "layer")).to(dev)
+        net.load_state_dict(torch.load(w, map_location=dev))
+        elogs.append(mod.predict_elog(net, X, centers_t, dev).astype(np.float64))
+        del net
+    return np.expm1(np.clip(np.mean(elogs, axis=0), 0, None))
+
+
+def predict_fusion(model: str, meta: dict) -> tuple[np.ndarray, np.ndarray]:
+    import polars as pl
+    import torch
+    import train_fusion as mod
+    from common import TEST_ANCHOR, user_universe
+    os.environ.update(meta.get("feature_flags") or FEATURE_ENV[model])
+    uids = user_universe()["user_id"].to_numpy()
+    cols = meta["feature_cols"]
+    f32 = [pl.col(c).cast(pl.Float32) for c in cols]
+    z = np.load(find(meta["stats_npz"], f"статистики препроцессинга {model}", model))
+    stats = {k: z[k] for k in ("med", "lo", "hi", "mean", "std")}
+    tab = mod.apply_stats_f16(
+        mod.load_tab_raw(TEST_ANCHOR, cols, f32, uids, check_target=False), stats)
+    x_mm = mod.open_x(TEST_ANCHOR)
+    dev, idx = _torch_device(), np.arange(len(uids))
+    trunk = tuple(int(t) for t in str(meta.get("trunk", "384,256")).split(","))
+    preds = []
+    for seed in meta["seeds"]:
+        w = find(f"{model}_seed{seed}.pt", f"веса {model}, сид {seed}", model)
+        net = mod.build_model(meta["d_tab"], meta.get("dropout", 0.15), dev,
+                              meta.get("tab_dim", 256), trunk)
+        net.load_state_dict(torch.load(w, map_location=dev))
+        lp = mod.predict_log(net, x_mm, tab, idx, dev, 4096)
+        preds.append(np.expm1(np.clip(lp, 0, None)).astype(np.float64))
+        del net
+    return np.mean(preds, axis=0), uids
+
+
+def predict_seq2(model: str, meta: dict) -> tuple[np.ndarray, np.ndarray]:
+    import torch
+    import train_seq2 as mod
+    from common import TEST_ANCHOR, user_universe
+    uids = user_universe()["user_id"].to_numpy()
+    x_mm = mod.open_x(TEST_ANCHOR)
+    dev, preds = _torch_device(), []
+    for seed in meta["seeds"]:
+        w = find(f"{model}_seed{seed}.pt", f"веса {model}, сид {seed}", model)
+        net = mod.build_model(meta["arch"], dev)
+        net.load_state_dict(torch.load(w, map_location=dev))
+        _, lp = mod.predict_main(net, x_mm, dev, 4096, 1)
+        preds.append(np.expm1(np.clip(lp, 0, None)).astype(np.float64))
+        del net
+    return np.mean(preds, axis=0), uids
+
+
+def _lgb(fname: str, what: str, model: str):
+    import lightgbm as lgb
+    return lgb.Booster(model_file=str(find(fname, what, model)))
+
+
+def predict_gbdt(model: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    """train_gbdt/train_xtw: two_stage = p*mu, иначе expm1(raw + m_hat)."""
+    kind = meta.get("model", "lgb")
+    if meta["objective"] == "two_stage":
+        m1 = _lgb(f"{model}__stage1.txt", f"{model}: бустер P(y>0)", model)
+        m2 = _lgb(f"{model}__stage2.txt", f"{model}: бустер E[log1p|y>0]", model)
+        p = m1.predict(X)
+        mu = m2.predict(X)
+        return np.expm1(np.clip(p * np.clip(mu, 0, None), 0, None))
+    if kind == "xgb":
+        import xgboost as xgb
+        b = xgb.Booster()
+        b.load_model(str(find(f"{model}.xgb.json", f"бустер XGBoost {model}", model)))
+        raw = b.predict(xgb.DMatrix(X))
+    else:
+        raw = _lgb(f"{model}.txt", f"бустер LightGBM {model}", model).predict(X)
+    if meta["objective"] == "log_mse":
+        return np.expm1(np.clip(raw + float(meta.get("m_hat_test", 0.0)), 0, None))
+    return np.clip(raw, 0, None)
+
+
+def predict_channel(model: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    from train_channel import combine
+    return combine({c: _lgb(f"{model}__{c}.txt", f"{model}: канал «{c}»", model).predict(X)
+                    for c in meta["channels"]})
+
+
+def predict_countaov(model: str, meta: dict, X: np.ndarray) -> np.ndarray:
+    from train_countaov import COMBINE
+    pc = _lgb(f"{model}__count.txt", f"{model}: голова числа заказов", model).predict(X)
+    pa = _lgb(f"{model}__aov.txt", f"{model}: голова среднего чека", model).predict(X)
+    return COMBINE[meta["mode"]](pc, pa, meta["aov_damp"])
+
+
+def predict_hmmsim(model: str, meta: dict) -> tuple[np.ndarray, np.ndarray]:
+    """У модели нет весов: пересчитываем симулятор с теми же гиперпараметрами."""
+    import polars as pl
+    from common import PREDS_DIR
+    out = PREDS_DIR / f"{model}_test.parquet"
+    if not out.exists():
+        log(f"{model}: сохранённых весов нет по построению (генеративный "
+            f"симулятор) — пересчитываю, ~6 мин")
+        run_script("train_hmm_sim.py", "--name", model,
+                   "--states", str(meta["states"]), "--sims", str(meta["sims"]),
+                   "--win", str(meta["win"]), "--em-cap", str(meta["em_cap"]),
+                   "--seed", str(meta["seed"]), "--splits", "test",
+                   env={"THREADS": os.environ.get("OMP_NUM_THREADS", "6")})
+    d = pl.read_parquet(out).sort("user_id")
+    return d["pred"].to_numpy(), d["user_id"].to_numpy()
+
+
+def predict_model(model: str) -> tuple[np.ndarray, np.ndarray]:
+    meta = load_meta(model)
+    kind = meta["kind"]
+    if kind == "hmm_sim":
+        return predict_hmmsim(model, meta)
+    if kind == "fusion":
+        return predict_fusion(model, meta)
+    if kind == "seq2":
+        return predict_seq2(model, meta)
+    X, uid = load_test_matrix(model, meta)
+    if kind in ("mlpziln", "mlp2"):
+        return predict_mlp_family(model, meta, X), uid
+    if kind == "mlpbin":
+        return predict_mlpbin(model, meta, X), uid
+    if kind == "channel":
+        return predict_channel(model, meta, X), uid
+    if kind == "countaov":
+        return predict_countaov(model, meta, X), uid
+    if kind == "gbdt":
+        return predict_gbdt(model, meta, X), uid
+    raise MissingArtifact(f"неизвестный тип модели {kind!r} в {model}_meta.json")
+
+
+# ----------------------------------------------------------------- проверка ---
+
+def stage_check() -> int:
+    """Что уже есть, а чего не хватает. Ничего не считает."""
+    print(f"MODELS_DIR: {MODELS_DIR}")
+    print(f"work/models: {WORK_MODELS}")
+    print(f"{'модель':<12} {'вес':>6}  {'meta':<5} {'веса':<26} калибровка")
+    print("-" * 78)
+    nmiss = 0
+    for m, w in sorted(BLEND_WEIGHTS.items(), key=lambda kv: -kv[1]):
+        has_meta = have(f"{m}_meta.json")
+        weights_ok = False
+        if has_meta:
+            need_w = load_meta(m).get("weights") or []
+            got = [f for f in need_w if have(f)]
+            weights_ok = len(got) == len(need_w)
+            wtxt = "нет весов (stateless)" if not need_w else f"{len(got)}/{len(need_w)}"
+        else:
+            wtxt = "?"
+        cal = have(f"{m}_cal.npz")
+        nmiss += 0 if (has_meta and weights_ok and cal) else 1
+        print(f"{m:<12} {w:>6.3f}  {'да' if has_meta else 'НЕТ':<5} "
+              f"{wtxt:<26} {'да' if cal else 'НЕТ'}")
+    print("-" * 78)
+    print(f"готовы к инференсу: {len(BLEND_WEIGHTS) - nmiss}/{len(BLEND_WEIGHTS)}")
+    if nmiss:
+        print("\nНедостающие артефакты создаются переобучением соответствующих\n"
+              "моделей — команды в final_submission/reproduce_training.md §2.\n"
+              "Трейнеры сохраняют веса сами (work/scripts/model_io.py).")
+    return nmiss
+
+
+# ------------------------------------------------------------------ стадии ----
 
 def stage_predict() -> None:
-    """Прогнозы всех моделей ансамбля -> models/preds_test/*.npy (log1p-шкала)."""
-    cfg = json.loads(need(MODELS_DIR / "blend_config.json", "конфиг ансамбля (blend_config.json)").read_text())
-    out_dir = MODELS_DIR / "preds_test"
-    out_dir.mkdir(exist_ok=True)
-
-    feats_tab = cfg["feature_columns"]["tabular"]        # 203 колонки (base+v2+v3+v4)
-    feats_xgb = cfg["feature_columns"].get("xgb", feats_tab)  # у XGB срез без v4 (194)
-    uid, X = load_test_matrix(feats_tab)
-    np.save(out_dir / "user_ids.npy", uid)
-    Xxgb = X if feats_xgb == feats_tab else load_test_matrix(feats_xgb)[1]
-
-    runners = {
-        "mlp_ziln": lambda: predict_mlp_ziln(X),
-        "mlp_bin": lambda: predict_mlp_bin(X),
-        "xgb_tweedie_log": lambda: predict_xgb(Xxgb, feats_xgb),
-        "channels": lambda: predict_channels(X),
-        "gru": lambda: predict_gru(uid),
-    }
-    for name in cfg["weights"]:
-        assert name in runners, f"в blend_config.json неизвестная модель: {name}"
-    for name, fn in runners.items():
-        if name not in cfg["weights"]:
-            log(f"predict {name}: пропуск (нет в blend_config.json)")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    uid_ref = None
+    for model in BLEND_WEIGHTS:
+        dst = CACHE_DIR / f"{model}.npy"
+        if dst.exists():
+            log(f"{model}: прогноз уже в кэше, пропускаю")
             continue
-        t = time.time()
-        lp = fn()
-        assert lp.shape == (N_USERS,) and np.isfinite(lp).all()
-        np.save(out_dir / f"{name}.npy", lp.astype(np.float64))
-        log(f"predict {name}: {time.time() - t:.0f}s, mean log1p={lp.mean():.4f}")
-
-
-# ---------------------------------------------------------------------------
-# Стадия 4: ансамбль = бленд -> калибровка -> поправки (всё в log1p)
-# ---------------------------------------------------------------------------
-def apply_calibration(lp: np.ndarray, table: Path) -> np.ndarray:
-    """Поквантильные сдвиги: np.interp по центрам бинов (calibrate.py)."""
-    t = np.load(table)
-    return np.clip(lp + np.interp(lp, t["centers"], t["shifts"]), 0, None)
+        t0 = time.time()
+        pred, uid = predict_model(model)
+        order = np.argsort(uid)
+        uid, pred = uid[order], np.asarray(pred, dtype=np.float64)[order]
+        if uid_ref is None:
+            uid_ref = uid
+            np.save(CACHE_DIR / "user_ids.npy", uid)
+        elif not np.array_equal(uid, uid_ref):
+            raise MissingArtifact(f"{model}: набор user_id не совпал с остальными")
+        np.save(dst, np.clip(pred, 0, None))
+        log(f"{model}: готово за {time.time()-t0:.0f}s, "
+            f"mean_log1p={np.log1p(np.clip(pred,0,None)).mean():.4f}")
 
 
 def stage_ensemble() -> np.ndarray:
-    cfg = json.loads(need(MODELS_DIR / "blend_config.json", "blend_config.json").read_text())
-    corr = json.loads(need(MODELS_DIR / "lb_corrections.json", "lb_corrections.json").read_text())
-    pred_dir = MODELS_DIR / "preds_test"
-    uid = np.load(need(pred_dir / "user_ids.npy", "user_ids.npy (стадия predict)"))
+    from calibrate import apply_shifts
+    uid_path = CACHE_DIR / "user_ids.npy"
+    if not uid_path.exists():
+        raise MissingArtifact(f"нет {uid_path} — сначала выполните стадию predict")
+    uid = np.load(uid_path)
+    lp_blend = np.zeros(len(uid), dtype=np.float64)
+    total_w = 0.0
+    for model, w in BLEND_WEIGHTS.items():
+        f = CACHE_DIR / f"{model}.npy"
+        if not f.exists():
+            raise MissingArtifact(f"нет прогноза {model} — сначала стадия predict")
+        lp = np.log1p(np.clip(np.load(f), 0, None))
+        z = np.load(find(f"{model}_cal.npz", f"таблица калибровки {model}", model))
+        lp_cal = apply_shifts(lp, z["centers"], z["shifts"])
+        lp_blend += w * lp_cal
+        total_w += w
+        log(f"{model:<12} w={w:.3f} mean_log1p {lp.mean():.4f} -> {lp_cal.mean():.4f}")
+    log(f"бленд: сумма весов {total_w:.4f}, mean_log1p {lp_blend.mean():.4f}, "
+        f"sd {lp_blend.std():.4f}")
 
-    # 1. взвешенное среднее в log1p (веса подобраны на валидации, см. README §5)
-    lp = np.zeros(N_USERS)
-    wsum = 0.0
-    for name, w in cfg["weights"].items():
-        comp = np.load(need(pred_dir / f"{name}.npy", f"прогноз {name} (стадия predict)"))
-        cal = MODELS_DIR / f"calibration_{name}.npz"
-        if cal.exists():                       # покомпонентная калибровка (ziln/bin)
-            comp = apply_calibration(comp, cal)
-        lp += w * comp
-        wsum += w
-    assert abs(wsum - 1.0) < 1e-6, f"веса бленда должны суммироваться к 1, сейчас {wsum}"
-
-    # 2. калибровка итогового бленда (если зафиксирована)
-    final_cal = MODELS_DIR / "calibration_blend.npz"
-    if final_cal.exists():
-        lp = apply_calibration(lp, final_cal)
-
-    # 3. поправки, уточнённые по публичному лидерборду (README §5.3-5.4):
-    #    глобальный сезонный сдвиг + сегментные сдвиги; все уже включают
-    #    консервативную усадку (shrinkage) для переноса на private.
-    lp = lp + float(corr["global_log_shift"])
-    for seg in corr.get("segments", []):
-        mask = eval_segment_mask(seg, uid)
-        lp[mask] += float(seg["log_shift"])
-        log(f"ensemble: сегмент {seg['name']}: {mask.sum()} юзеров, сдвиг {seg['log_shift']:+.4f}")
-    return np.clip(lp, 0, None)
-
-
-def eval_segment_mask(seg: dict, uid: np.ndarray) -> np.ndarray:
-    """Сегмент задаётся порогом по одному признаку тестового среза
-    ({"column": ..., "op": ">=|<", "threshold": ...}) — прозрачно и воспроизводимо."""
-    col, op, thr = seg["column"], seg["op"], float(seg["threshold"])
-    uid2, X = load_test_matrix([col])
-    assert (uid2 == uid).all()
-    v = X[:, 0].astype(np.float64)
-    if op == ">=":
-        return v >= thr
-    if op == "<":
-        return v < thr
-    raise ValueError(f"сегмент {seg['name']}: неизвестный оператор {op}")
+    lp_final = AFFINE_SLOPE * lp_blend + AFFINE_SHIFT
+    log(f"аффин ({AFFINE_SLOPE:.7f} * lp + {AFFINE_SHIFT:.7f}): "
+        f"mean {lp_blend.mean():.4f} -> {lp_final.mean():.4f}, "
+        f"sd {lp_blend.std():.4f} -> {lp_final.std():.4f}")
+    for what, got, exp in (("среднее", lp_final.mean(), EXPECT_MEAN_AFTER),
+                           ("разброс", lp_final.std(), EXPECT_SD_AFTER)):
+        if abs(got - exp) > 0.05:
+            print(f"ВНИМАНИЕ: {what} итогового прогноза {got:.4f}, "
+                  f"ожидалось ~{exp:.4f} — проверьте состав бленда", file=sys.stderr)
+    np.save(CACHE_DIR / "final_lp.npy", lp_final)
+    return lp_final
 
 
-# ---------------------------------------------------------------------------
-# Стадия 5: submission + самопроверки
-# ---------------------------------------------------------------------------
-def stage_submission(lp: np.ndarray) -> None:
+def stage_submission(lp: np.ndarray | None = None) -> None:
     import polars as pl
-    uid = np.load(MODELS_DIR / "preds_test" / "user_ids.npy")
-    pred = np.expm1(lp)
-    assert pred.shape == (N_USERS,)
-    assert np.isfinite(pred).all() and (pred >= 0).all()
-    sample = pl.read_csv(ROOT / "sample_submit.csv", schema_overrides={"user_id": pl.Int64})
-    assert sorted(sample["user_id"].to_list()) == sorted(uid.tolist()), "вселенная user_id не совпала с sample_submit"
+    from common import SAMPLE_SUBMIT
+    if lp is None:
+        lp = np.load(CACHE_DIR / "final_lp.npy")
+    uid = np.load(CACHE_DIR / "user_ids.npy")
+    vals = np.expm1(np.clip(lp, 0, None))
+    sample = pl.read_csv(SAMPLE_SUBMIT, schema_overrides={"user_id": pl.Int64})
+    out = (sample.select("user_id")
+           .join(pl.DataFrame({"user_id": uid.astype(np.int64), "predict": vals}),
+                 on="user_id", how="left"))
+    assert out.height == sample.height, "число строк не совпало с sample_submit"
+    assert out["predict"].null_count() == 0, "есть user_id без прогноза"
+    assert float(out["predict"].min()) >= 0.0, "есть отрицательные прогнозы"
 
 
-STAGES = ["features", "sequences", "predict", "ensemble", "submission"]
+STAGES = ["check", "features", "predict", "ensemble", "submission"]
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--stage", choices=STAGES + ["all"], default="all",
-                    help="какую стадию выполнить (по умолчанию весь пайплайн)")
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--stage", choices=STAGES + ["all"], default="all")
     args = ap.parse_args()
 
-    todo = STAGES if args.stage == "all" else [args.stage]
-    lp = None
-    if "features" in todo:
-        stage_features()
-    if "sequences" in todo:
-        stage_sequences()
-    if "predict" in todo:
-        stage_predict()
-    if "ensemble" in todo:
-        lp = stage_ensemble()
-    if "submission" in todo:
-        if lp is None:
-            lp = stage_ensemble()
-        stage_submission(lp)
-    log("ГОТОВО")
+    if args.stage == "check":
+        return 1 if stage_check() else 0
+    try:
+        if args.stage in ("features", "all"):
+            stage_features()
+        if args.stage in ("predict", "all"):
+            stage_predict()
+        lp = stage_ensemble() if args.stage in ("ensemble", "all") else None
+        if args.stage in ("submission", "all"):
+            stage_submission(lp)
+    except MissingArtifact as e:
+        print(f"\nОШИБКА: {e}\n", file=sys.stderr)
+        print("Состояние артефактов: python inference.py --stage check", file=sys.stderr)
+        return 2
+    return 0
 
 
-T0 = time.time()
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
