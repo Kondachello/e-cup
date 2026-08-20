@@ -84,7 +84,16 @@ def main():
             time.sleep(20)
             continue
         idle = 0
-        spec_p = jobs[0]
+        # Atomic claim. Two runners were started by accident and both picked jobs[0],
+        # ran the same training twice and doubled peak memory until the OOM killer took
+        # them (20.08, lagdir_smoke). os.rename is atomic on POSIX: exactly one runner
+        # can win the claim, the loser sees FileNotFoundError and moves to the next job.
+        claimed = jobs[0].with_suffix(".json.running")
+        try:
+            os.rename(jobs[0], claimed)
+        except FileNotFoundError:
+            continue
+        spec_p = claimed
         try:
             spec = json.loads(spec_p.read_text())
         except Exception as e:
@@ -92,7 +101,7 @@ def main():
             shutil.move(str(spec_p), DONE / (spec_p.name + ".bad"))
             continue
         wait_safe()
-        name = spec.get("name", spec_p.stem)
+        name = spec.get("name", spec_p.stem.removesuffix(".json"))
         env = os.environ.copy()
         env.update({k: str(v) for k, v in spec.get("env", {}).items()})
         log(f"START {name}")
@@ -108,7 +117,7 @@ def main():
         spec["exit"] = r.returncode
         spec["seconds"] = round(dt)
         spec["tail"] = tail
-        (DONE / spec_p.name).write_text(json.dumps(spec, ensure_ascii=False, indent=1))
+        (DONE / spec_p.name.removesuffix(".running")).write_text(json.dumps(spec, ensure_ascii=False, indent=1))
         # задание могли снять из очереди уже во время выполнения — это не ошибка
         spec_p.unlink(missing_ok=True)
 
