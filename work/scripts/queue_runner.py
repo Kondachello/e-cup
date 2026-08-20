@@ -14,7 +14,10 @@ import subprocess
 import time
 from pathlib import Path
 
-WORK = Path("/Users/alexanderkondakov/ozon-cup/work")
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
+WORK = ROOT / "work"
+# Job shell: zsh on the mac this was written for, bash elsewhere. $SHELL wins if set.
+SHELL = os.environ.get("QUEUE_SHELL") or (shutil.which("zsh") or shutil.which("bash") or "/bin/sh")
 Q = WORK / "queue"
 DONE = Q / "done"
 Q.mkdir(exist_ok=True)
@@ -30,7 +33,16 @@ def log(msg: str):
 
 
 def free_mem_pct() -> int:
+    # Linux: MemAvailable/MemTotal from /proc. macOS: memory_pressure -Q.
     try:
+        meminfo = Path("/proc/meminfo")
+        if meminfo.exists():
+            vals = {}
+            for line in meminfo.read_text().splitlines():
+                k, _, rest = line.partition(":")
+                vals[k] = float(rest.strip().split()[0])
+            if vals.get("MemTotal"):
+                return int(100 * vals.get("MemAvailable", 0) / vals["MemTotal"])
         out = subprocess.run(["memory_pressure", "-Q"], capture_output=True, text=True, timeout=10).stdout
         for tok in out.split():
             if tok.endswith("%"):
@@ -41,7 +53,7 @@ def free_mem_pct() -> int:
 
 
 def disk_free_gb() -> float:
-    st = os.statvfs("/")
+    st = os.statvfs(str(ROOT))
     return st.f_bavail * st.f_frsize / 1e9
 
 
@@ -72,7 +84,16 @@ def main():
             time.sleep(20)
             continue
         idle = 0
-        spec_p = jobs[0]
+        # Atomic claim. Two runners were started by accident and both picked jobs[0],
+        # ran the same training twice and doubled peak memory until the OOM killer took
+        # them (20.08, lagdir_smoke). os.rename is atomic on POSIX: exactly one runner
+        # can win the claim, the loser sees FileNotFoundError and moves to the next job.
+        claimed = jobs[0].with_suffix(".json.running")
+        try:
+            os.rename(jobs[0], claimed)
+        except FileNotFoundError:
+            continue
+        spec_p = claimed
         try:
             spec = json.loads(spec_p.read_text())
         except Exception as e:
@@ -80,15 +101,15 @@ def main():
             shutil.move(str(spec_p), DONE / (spec_p.name + ".bad"))
             continue
         wait_safe()
-        name = spec.get("name", spec_p.stem)
+        name = spec.get("name", spec_p.stem.removesuffix(".json"))
         env = os.environ.copy()
         env.update({k: str(v) for k, v in spec.get("env", {}).items()})
         log(f"START {name}")
         t0 = time.time()
         job_log = WORK / "reports" / f"job_{name}.log"
         with open(job_log, "w") as lf:
-            r = subprocess.run(["/bin/zsh", "-c", spec["cmd"]], env=env,
-                               cwd="/Users/alexanderkondakov/ozon-cup",
+            r = subprocess.run([SHELL, "-c", spec["cmd"]], env=env,
+                               cwd=str(ROOT),
                                stdout=lf, stderr=subprocess.STDOUT, text=True)
         dt = time.time() - t0
         tail = open(job_log).read()[-600:]
@@ -96,7 +117,7 @@ def main():
         spec["exit"] = r.returncode
         spec["seconds"] = round(dt)
         spec["tail"] = tail
-        (DONE / spec_p.name).write_text(json.dumps(spec, ensure_ascii=False, indent=1))
+        (DONE / spec_p.name.removesuffix(".running")).write_text(json.dumps(spec, ensure_ascii=False, indent=1))
         # задание могли снять из очереди уже во время выполнения — это не ошибка
         spec_p.unlink(missing_ok=True)
 

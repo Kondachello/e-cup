@@ -354,3 +354,42 @@ fusion_v3_escal555	1.696810	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk
 fusion_v3_escal42	1.698175	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=42 best_steps=[1476] per_seed=[1.69817] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine42 с тем же сидом и сеткой оценки, но по сырому
 fusion_v3_escal7	1.685776	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=7 best_steps=[2706] per_seed=[1.68578] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine7 с тем же сидом и сеткой оценки, но по сырому
 fusion_v3_e6_555	1.684636	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 eval_every=492 es=cal seeds=555 best_steps=[2460] per_seed=[1.68464] калиброванный критерий остановки + 6 эпох: калиброванный скор на 3 эпохах до конца бюджета не вышел на плато (1.66868 на шаге 2706 и всё ещё падал)
+hz_smoke_surv	1.718924	daily hazard surv: days=120 stride=3 uf=0.12 trees=250 scen=16
+hz_smoke_pb	1.719027	daily hazard pb: days=120 stride=3 uf=0.12 trees=250 scen=16
+hz_smoke_mc	1.761449	daily hazard mc: days=120 stride=3 uf=0.12 trees=250 scen=16
+hz_v1_surv	1.705057	daily hazard surv: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00085 после калибровки (корр 0.977), вклад 0.000005 — шум
+hz_v1_pb	1.706225	daily hazard pb: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00083 после калибровки (корр 0.977), вклад 0.000005 — шум
+hz_v1_mc	1.720946	daily hazard mc: days=300 stride=2 uf=0.35 trees=600 scen=48; ЗАПАС +0.00058 после калибровки (корр 0.970), вклад 0.000002 — шум
+lag0	1.689886	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2026-01-14
+lag14	1.721101	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2025-12-31
+lag28	1.744511	lag-TTA champion tw1.45-on-log gap30 n12 it=57; features at 2025-12-17
+lagmix_a	1.697800	lag-TTA champion tw1.45-on-log gap30 n12 it=57; mix {'lag0': 0.5, 'lag14': 0.5}
+lagmix_b	1.694822	lag-TTA champion tw1.45-on-log gap30 n12 it=57; mix {'lag0': 0.6, 'lag14': 0.25, 'lag28': 0.15}
+lagd0	1.679469	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2026-01-14; ЗАПАС +0.00050 — свежие фичи, в оболочке
+lagd14	1.715825	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-31; ЗАПАС +0.00036 (винтаж 31.12 — новогодний якорь, аномален по Р5)
+lagd28	1.745023	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-17; ЗАПАС +0.00307 (рекорд проекта был 0.00193); честный вклад один +0.000083, с hz_v1_surv +0.000122
+lagd42	1.767829	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-12-03; ЗАПАС +0.00280; честный вклад один +0.000011; с lagd28 не складывается
+lagd56	1.791567	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-19; ЗАПАС +0.00091; честный вклад -0.000019
+lagd70	1.807626	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-05; ЗАПАС +0.00014 — застоялость исчерпана
+tabpfn_probe	-	пробник остатка бленда TabPFN-2.5: mdl_flint real -0.01159 vs placebo -0.00114 (2 контекста x4000, оценка 4000) — сигнала нет, теорема оболочки подтверждена снаружи зоопарка
+kalman_smoke	1.725145	kalman mu+AR(1) по 6 окнам x30д, БЕЗ признаков; p=0.4337 q=0.1923 lam=0.7173
+kalman	1.714244	kalman mu+AR(1) по 12 окнам x30д, БЕЗ признаков; p=0.4476 q=0.1779 lam=0.7264
+ts2lag0	1.687621	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2026-01-14
+ts2lag14	1.722931	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-31
+ts2lag28	1.749881	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-17
+ts2lag42	1.767153	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-03
+lagB0	1.685024	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2026-01-14
+lagB28	1.749356	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2025-12-17
+lagB42	1.768863	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2025-12-03
+lagC0	1.685294	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2026-01-14
+lagC28	1.749690	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2025-12-17
+lagC42	1.768891	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2025-12-03
+tsb	2.106544	TSB intermittent demand, ap=0.02 az=0.3 выбраны на DEC31; 30*p*z, без признаков
+hawkes	1.878159	hawkes event-stream: alpha=0.65 beta=1/3.5d выбраны на DEC31; все 409 дней, интервалы вместо матрицы
+auniv_ctl	1.689437	lgb/log_mse
+auniv_on	1.690587	lgb/log_mse
+auniv_soft	1.690916	lgb/log_mse
+lagdir_smoke0	1.696604	direct stale-conditioned tweedie, k=0 as feature; lags (0, 14, 28, 42), it=49
+lagdir_smoke28	1.752019	direct stale-conditioned tweedie, k=28 as feature; lags (0, 14, 28, 42), it=49
+lagdir0	1.696604	direct stale-conditioned tweedie, k=0 as feature; lags (0, 14, 28, 42), it=49
+lagdir28	1.752019	direct stale-conditioned tweedie, k=28 as feature; lags (0, 14, 28, 42), it=49

@@ -23,7 +23,7 @@ import numpy as np
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import PREDS_DIR, VAL_ANCHOR, load_anchor, rmsle
+from common import PREDS_DIR, ROOT, VAL_ANCHOR, load_anchor, rmsle
 
 # Действующий честный бленд (val OOF 1.666718). Прежний эталон содержал gru_final
 # с весом 0.145 — модель, обученную до введения зазора 30 дней, её валидационный скор
@@ -41,6 +41,22 @@ def load_lp(path: Path, uid_ref: np.ndarray) -> np.ndarray:
 
 
 def blend_lp(uid_ref: np.ndarray) -> np.ndarray:
+    """Reference blend, preferring the pack column over the hardcoded weights above.
+
+    Bug found by track 5: rebuilding the blend from BLEND scores 1.666718 while the live
+    champion (`blend` column of work/preds_pack/val_preds.parquet) scores 1.666395. Since
+    margin = blend_score/model_score - corr, a weaker reference inflates the margin of
+    EVERY candidate by about +0.00019 - 8 noise units, enough to accept a dead model.
+    The pack column tracks the live blend; the hardcoded dict goes stale by construction.
+    """
+    pack = ROOT / "work" / "preds_pack" / "val_preds.parquet"
+    if pack.exists():
+        df = pl.read_parquet(pack).sort("user_id")
+        if "blend" in df.columns and np.array_equal(df["user_id"].to_numpy(), uid_ref):
+            return df["blend"].to_numpy().astype(np.float64)      # already log1p
+        print("ВНИМАНИЕ: пакет есть, но колонка blend не подошла — беру старые веса")
+    else:
+        print("ВНИМАНИЕ: пакета нет, эталон из захардкоженных весов (устаревает)")
     return sum(w * load_lp(PREDS_DIR / f"{n}_val.parquet", uid_ref) for n, w in BLEND.items())
 
 
@@ -72,7 +88,11 @@ def main():
             continue
         lp = load_lp(path, uid)
         e = lp - ly
-        c = float(np.corrcoef(e, eb)[0, 1])
+        sm = float(np.sqrt(np.mean(e ** 2)))
+        # UNcentered correlation: the identity margin = sb/sm - c holds for E[e*eb]/(sm*sb).
+        # np.corrcoef centres both errors, which distorted 6 of 30 models - every one with a
+        # non-zero mean error, i.e. every uncalibrated model (Zhenya, zhenya_report.md).
+        c = float(np.mean(e * eb) / max(sm * blend_rmsle, 1e-12))
         # optimal 2-way weight in log space: minimise ||(1-w) eb + w e||
         d = e - eb
         w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))
@@ -80,7 +100,6 @@ def main():
         # Корреляция ошибок сама по себе НИЧЕГО не значит: для любой модели внутри
         # линейной оболочки бленда она тождественно равна sb/sm (остаток бленда
         # ортогонален оболочке). Работает только ЗАПАС — доля модели вне оболочки.
-        sm = float(np.sqrt(np.mean(e ** 2)))
         margin = blend_rmsle / max(sm, 1e-12) - c
         out["models"][name] = {"val_rmsle": rmsle(y, np.expm1(lp)), "err_corr": c,
                                "corr_expected": blend_rmsle / max(sm, 1e-12),

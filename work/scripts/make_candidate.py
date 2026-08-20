@@ -71,6 +71,12 @@ def main():
               f"усадка {args.carry_shrink}; после переноса среднее {new.mean():.4f} "
               f"разброс {new.std():.4f}")
 
+    if args.strength != 1.0:
+        full = new - ref
+        new = ref + args.strength * full
+        print(f"сила шага {args.strength}: направление к опоре ужато с разброса "
+              f"{full.std():.4f} до {(new - ref).std():.4f}")
+
     h = new - ref
     n = len(uid)
     nv, _ = novelty(h, span_matrix(MEASURED, n))

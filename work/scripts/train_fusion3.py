@@ -53,6 +53,43 @@ Early-stopping criterion (--es-metric):
   --final: additionally retrain on ALL seq3 anchors + VAL for --epochs
     epochs (no early stop), save TEST preds. Multi-seed: raw-GMV averaging.
 
+Checkpoint averaging (--ckpt-avg / --swa / --ckpt-mode / --ckpt-sweep):
+  The calibrated score along the checkpoint grid is NOT monotone — seed 555 runs
+  1.67334, 1.67286, 1.67033, 1.67128, 1.67095, 1.66987, 1.67197, 1.66960, 1.66923,
+  1.66870, 1.66868 — a slow descent with ~0.002 of wobble on top.  Early stopping
+  keeps ONE point of that noisy curve, i.e. it keeps the MAXIMUM of the noise
+  rather than its average.  Averaging several late points removes the same share
+  of that noise as seed averaging does, but inside a single run and for free.
+    --ckpt-avg N   method (a): average the PREDICTIONS of N checkpoints in log1p,
+                   the space the blend and the calibration live in (merge_seeds.py
+                   averages seeds the same way; measured on the three cal-criterion
+                   seeds, log1p 1.667846 beats raw-GMV 1.667864).
+    --swa N        method (b): average the WEIGHTS of N checkpoints.  Legal here
+                   because the net has no BatchNorm — only LayerNorm — so there
+                   are no running statistics to recompute.  Weights must lie in
+                   one basin, which cosine annealing guarantees only for LATE
+                   checkpoints, not for the top-k ones.
+    --ckpt-mode    last (default) or top.  last is the default deliberately:
+                   phase 2 retrains with NO validation, so "best by criterion"
+                   cannot be evaluated there, and only `last` reproduces in both
+                   phases.  Both phases must use the same procedure — otherwise
+                   val preds come from an averaged model while test preds come
+                   from a single one, and the blend optimiser fits weights to a
+                   procedure that does not exist on test.
+                   CAVEAT: that symmetry holds only while phase 1 runs its budget
+                   out.  Phase 2 has no early stopping, so its last-k checkpoints
+                   always sit at the tail of the cosine schedule where the LR is
+                   ~0; if phase 1 stopped early on patience, its last-k sit
+                   mid-schedule where the LR is still large, and the two phases
+                   average different things.  With --es-metric cal the runs do go
+                   the full distance (best_step 2706 of 2952 on every seed
+                   measured), so the two coincide — but a config that stops early
+                   breaks the argument and must not use these flags blindly.
+    --ckpt-sweep   diagnostic: prints/saves the calibrated score for k=1..N over
+                   both methods and both modes; saves nothing else and does not
+                   change the preds the run writes.
+  All four are OFF by default and the default path stays bit-identical.
+
 Smoke: --smoke = 1 train anchor, <=200 optimizer steps, batch <=1024, val
 rows ::5, single seed, NOTHING written; prints one JSON line with val_rmsle.
 
@@ -89,8 +126,8 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from calibrate import apply_shifts, fit_shifts  # noqa: E402
-from common import (TEST_ANCHOR, VAL_ANCHOR, WORK, feature_cols,  # noqa: E402
-                    load_anchor, rmsle, user_universe)
+from common import (REPORTS_DIR, TEST_ANCHOR, VAL_ANCHOR, WORK,  # noqa: E402
+                    feature_cols, load_anchor, rmsle, user_universe)
 from exp_lib import log_score, save_preds  # noqa: E402
 
 SEQ_DIR = WORK / "seq3"
@@ -106,6 +143,7 @@ SCALE = SCALES_ALL     # dequant scale of the first NCH channels
 STATS_MAX_ROWS = 750_000
 SMOKE_MAX_STEPS = 200
 SMOKE_MAX_BATCH = 1024
+SWEEP_SWA_MAX_K = 8        # см. ckpt_sweep(): выше этого k усреднение весов не считаем
 
 
 def parse_args():
@@ -145,6 +183,21 @@ def parse_args():
     p.add_argument("--es-bins", type=int, default=24,
                    help="quantile bins of the --es-metric cal calibration "
                         "(calibrate.py default is 24; keep them equal)")
+    p.add_argument("--ckpt-avg", type=int, default=0, metavar="N",
+                   help="метод (а): усреднить ПРОГНОЗЫ N контрольных точек в log1p "
+                        "вместо одной лучшей; 0 = выключено, путь по умолчанию "
+                        "сохранён побитово")
+    p.add_argument("--swa", type=int, default=0, metavar="N",
+                   help="метод (б): усреднить ВЕСА N контрольных точек (stochastic "
+                        "weight averaging) и предсказать одной моделью; 0 = выключено")
+    p.add_argument("--ckpt-mode", choices=("top", "last"), default="last",
+                   help="какие N точек берём: last = последние по шагу (единственный "
+                        "режим, воспроизводимый в фазе 2, где валидации нет), "
+                        "top = лучшие по критерию --es-metric")
+    p.add_argument("--ckpt-sweep", action="store_true",
+                   help="диагностика: после фазы 1 напечатать таблицу калиброванного "
+                        "скора по k=1..N для обоих методов и обоих режимов; ничего "
+                        "не сохраняет и не меняет выбранный прогноз")
     p.add_argument("--notes", default="")
     return p.parse_args()
 
@@ -316,12 +369,129 @@ def cal_rmsle_2fold(pred_log: np.ndarray, ly: np.ndarray, y_raw: np.ndarray,
             rmsle(y_raw[~half], np.expm1(out[~half])))
 
 
+# ---------------- checkpoint averaging (--ckpt-avg / --swa) ----------------
+#
+# Почему это вообще может работать.  Кривая КАЛИБРОВАННОГО скора по контрольным
+# точкам не монотонна: у сида 555 она идёт 1.67334, 1.67286, 1.67033, 1.67128,
+# 1.67095, 1.66987, 1.67197, 1.66960, 1.66923, 1.66870, 1.66868 — медленный спуск
+# плюс колебания амплитудой ~0.002.  Ранняя остановка выбирает ОДНУ точку этой
+# шумной кривой, то есть берёт МАКСИМУМ шума, а не его среднее.  Усреднение
+# нескольких поздних точек снимает ту же долю шума, что и усреднение сидов, но
+# внутри одного прогона и без дополнительного обучения.
+#
+# Два способа отличаются тем, ЧТО усредняется:
+#   (а) --ckpt-avg  прогнозы, в log1p (пространство бленда и калибровки; см.
+#       merge_seeds.py, который так же усредняет сиды, и замер log1p 1.667846
+#       против сырого GMV 1.667864 на тех же трёх сидах);
+#   (б) --swa       веса.  Здесь это законно: в модели нет BatchNorm, только
+#       LayerNorm, поэтому пересчёт бегущих статистик не нужен.  Но веса разных
+#       точек должны лежать в одной впадине — расписание CosineAnnealing загоняет
+#       скорость обучения в ноль к концу, так что близки именно ПОЗДНИЕ точки;
+#       для режима top этого никто не гарантирует.
+#
+# Режим по умолчанию — last, а не top, намеренно.  Фаза 2 (--final) переобучается
+# БЕЗ валидации, и выбрать там «лучшие по критерию» точки физически нечем; из двух
+# режимов воспроизводится в обеих фазах только last.  Режим top меряется как
+# верхняя граница, но он не переносится на тест симметрично.
+
+
+def _avg_log1p(preds: list[np.ndarray]) -> np.ndarray:
+    """Среднее прогнозов в log1p — то же пространство, что у merge_seeds.py."""
+    return np.mean(np.stack(preds).astype(np.float64), axis=0)
+
+
+def _avg_states(states: list[dict]):
+    """Среднее весов.  Целочисленные тензоры (если появятся) берутся у последней
+    точки, а не усредняются: усреднять счётчики бессмысленно."""
+    import torch
+    out = {}
+    for k, v in states[-1].items():
+        if torch.is_floating_point(v):
+            acc = torch.zeros_like(v, dtype=torch.float64)
+            for s in states:
+                acc += s[k].double()
+            out[k] = (acc / len(states)).to(v.dtype)
+        else:
+            out[k] = v.clone()
+    return out
+
+
+def _push_ckpt(buf: list, cap: int, step: int, crit: float, raw: float,
+               pred_log, model) -> None:
+    """Положить точку в буфер (веса — копией на CPU, чтобы обучение шло дальше)."""
+    buf.append({"step": int(step), "crit": crit, "raw": raw,
+                "pred": None if pred_log is None else np.asarray(pred_log).copy(),
+                "state": None if model is None else
+                {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}})
+    if cap > 0:
+        del buf[:max(0, len(buf) - cap)]
+
+
+def _select_ckpts(buf: list[dict], k: int, mode: str) -> list[dict]:
+    """N точек в ХРОНОЛОГИЧЕСКОМ порядке (важно для усреднения весов)."""
+    k = max(1, min(k, len(buf)))
+    if mode == "last":
+        return buf[-k:]
+    order = sorted(range(len(buf)), key=lambda i: buf[i]["crit"])[:k]
+    return [buf[i] for i in sorted(order)]
+
+
+def ckpt_sweep(buf, model, val, device, args, es_ly, es_y, es_half, seed) -> list[dict]:
+    """Таблица k x {метод} x {режим} по честному калиброванному скору.
+
+    Диагностика: НИЧЕГО не сохраняет и не влияет на выбранный прогноз, но
+    затирает веса модели (их надо перезагрузить у вызывающей стороны).
+    k=1 в режиме top — это ровно та точка, которую выбрала бы ранняя остановка,
+    поэтому её строка служит проверкой согласованности: pred_avg_cal должен
+    совпасть с лучшим CAL из журнала обучения, а swa_cal — с ним же.
+    """
+    val_x, val_tab, _, idx = val
+    rows = []
+    for mode in ("last", "top"):
+        for k in range(1, len(buf) + 1):
+            sel = _select_ckpts(buf, k, mode)
+            lp = _avg_log1p([c["pred"] for c in sel])
+            a_cal, _ = cal_rmsle_2fold(lp, es_ly, es_y, es_half, args.es_bins)
+            row = {"seed": seed, "mode": mode, "k": k,
+                   "steps": [int(c["step"]) for c in sel],
+                   "pred_avg_cal": round(float(a_cal), 6),
+                   "pred_avg_raw": round(float(rmsle(
+                       es_y, np.expm1(np.clip(lp, 0, None)))), 6)}
+            # Усреднение прогнозов почти бесплатно (сложение массивов + 0.05 с на
+            # калибровку), а усреднение весов требует ПОЛНОГО прохода по 250k
+            # строк на каждое k, поэтому его считаем только до SWEEP_SWA_MAX_K:
+            # дальше в окно неизбежно попадают ранние точки, где усреднять веса
+            # заведомо нечего.
+            if k <= SWEEP_SWA_MAX_K and sel[0].get("state") is not None:
+                model.load_state_dict(_avg_states([c["state"] for c in sel]))
+                wl = predict_log(model, val_x, val_tab, idx, device, args.eval_batch)
+                w_cal, _ = cal_rmsle_2fold(wl, es_ly, es_y, es_half, args.es_bins)
+                row["swa_cal"] = round(float(w_cal), 6)
+                row["swa_raw"] = round(float(rmsle(
+                    es_y, np.expm1(np.clip(wl, 0, None)))), 6)
+            rows.append(row)
+            print(f"  [sweep s{seed}] {mode} k={k:<2d} pred_avg cal "
+                  f"{row['pred_avg_cal']:.6f} raw {row['pred_avg_raw']:.6f}"
+                  + (f" | swa cal {row['swa_cal']:.6f} raw {row['swa_raw']:.6f}"
+                     if "swa_cal" in row else "")
+                  + f"  steps {row['steps']}", flush=True)
+    return rows
+
+
 # ---------------- training ----------------
 
 def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epochs,
-              val=None, eval_every=0, patience=3, label="p1", cal_secs=None):
+              val=None, eval_every=0, patience=3, label="p1", cal_secs=None,
+              ckpt_buf=None, ckpt_states=False, ckpt_cap=0):
     """val = (val_x_mm, val_tab, val_y30_raw, idx) -> early stop on VAL RMSLE.
-    Returns (model, best_state, best_rmsle, best_step, steps_done)."""
+    Returns (model, best_state, best_rmsle, best_step, steps_done).
+
+    ckpt_buf is not None -> удерживать контрольные точки для --ckpt-avg/--swa/
+    --ckpt-sweep.  Буфер заполняется на той же сетке eval_every и в фазе 1 (там
+    есть валидация, поэтому кладём и прогноз, и критерий), и в фазе 2 (валидации
+    нет, кладём только веса).  ckpt_cap>0 держит лишь последние ckpt_cap точек.
+    При ckpt_buf=None не выполняется ни одной лишней операции: путь по умолчанию
+    не тратит ни одного дополнительного обращения к генератору случайных чисел."""
     import torch
     import torch.nn.functional as F
     torch.manual_seed(seed)
@@ -368,6 +538,9 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
                 cal_secs.append(dt)
             crit = vc
             extra = f" | CAL {vc:.5f} (holdout {vc1:.5f}, +{dt:.2f}s)"
+        if ckpt_buf is not None:
+            _push_ckpt(ckpt_buf, ckpt_cap, step, float(crit), float(vr),
+                       pred_log, model if ckpt_states else None)
         if crit < best_rmsle - 1e-5:
             best_rmsle, best_step, bad = crit, step, 0
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
@@ -418,6 +591,12 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
                           f"lr {sched.get_last_lr()[0]:.2e} {time.time() - t0:.0f}s", flush=True)
                 if val is not None and eval_every and step % eval_every == 0:
                     do_eval()
+                elif (val is None and ckpt_buf is not None and eval_every
+                        and step % eval_every == 0):
+                    # фаза 2: валидации нет, критерия нет, копим только веса —
+                    # усреднять там можно лишь по режиму last
+                    _push_ckpt(ckpt_buf, ckpt_cap, step, float("nan"),
+                               float("nan"), None, model)
                 if stop or step >= max_steps:
                     break
 
@@ -426,6 +605,9 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
     if val is None:
         best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         best_step = step
+        if ckpt_buf is not None and (not ckpt_buf or ckpt_buf[-1]["step"] != step):
+            _push_ckpt(ckpt_buf, ckpt_cap, step, float("nan"), float("nan"),
+                       None, model)
     return model, best_state, best_rmsle, best_step, step
 
 
@@ -517,17 +699,48 @@ def main():
           f"eval_every={eval_every} val_rows={len(val_idx)}", flush=True)
 
     # ---- Phase 1: selection train + early stop on VAL ----
+    # Усреднение контрольных точек включается ТОЛЬКО флагами; при ckpt_on=False
+    # ни одна строка ниже не исполняется и путь остаётся прежним побитово.
+    ckpt_on = bool(args.ckpt_avg or args.swa or args.ckpt_sweep)
+    ckpt_need_states = bool(args.swa or args.ckpt_sweep)
+    sweep_rows: list[dict] = []
+    es_ly = es_y_c = es_half_c = None
+    if ckpt_on:
+        # тот же честный разрез, что у критерия остановки и у README preds_pack:
+        # половина юзеров подбирает сдвиги, половина ими меряется, и наоборот
+        es_y_c = val_y30_raw[val_idx]
+        es_ly = np.log1p(np.clip(es_y_c, 0, None))
+        es_half_c = np.random.default_rng(0).permutation(len(es_y_c)) < len(es_y_c) // 2
+
     val_pred_sum, per_seed_rmsle, best_steps = None, [], []
     cal_secs: list[float] = []
     for seed in seeds:
+        ckpt_buf: list | None = [] if ckpt_on else None
         model, best_state, _, best_step, steps_done = run_train(
             args, device, seed, d_tab, xs1, tabs1, ylogs1, ybuys1,
             max_steps=max_steps, epochs=args.epochs,
             val=(val_x, val_tab, val_y30_raw, val_idx),
             eval_every=eval_every, patience=args.patience, label="p1",
-            cal_secs=cal_secs)
+            cal_secs=cal_secs,
+            ckpt_buf=ckpt_buf, ckpt_states=ckpt_need_states, ckpt_cap=32)
+        if args.ckpt_sweep and ckpt_buf:
+            sweep_rows += ckpt_sweep(ckpt_buf, model,
+                                     (val_x, val_tab, val_y30_raw, val_idx),
+                                     device, args, es_ly, es_y_c, es_half_c, seed)
         model.load_state_dict(best_state)
         pred_log = predict_log(model, val_x, val_tab, val_idx, device, args.eval_batch)
+        if ckpt_buf and (args.swa or args.ckpt_avg):
+            k = args.swa or args.ckpt_avg
+            sel = _select_ckpts(ckpt_buf, k, args.ckpt_mode)
+            if args.swa:
+                model.load_state_dict(_avg_states([c["state"] for c in sel]))
+                pred_log = predict_log(model, val_x, val_tab, val_idx, device,
+                                       args.eval_batch)
+            else:
+                pred_log = _avg_log1p([c["pred"] for c in sel])
+            print(f"[p1 seed {seed}] {'swa' if args.swa else 'ckpt-avg'} "
+                  f"{args.ckpt_mode} k={len(sel)} steps "
+                  f"{[int(c['step']) for c in sel]}", flush=True)
         pred_raw = np.expm1(np.clip(pred_log, 0, None)).astype(np.float64)
         r = rmsle(val_y30_raw[val_idx], pred_raw)
         per_seed_rmsle.append(r)
@@ -535,7 +748,7 @@ def main():
         val_pred_sum = pred_raw if val_pred_sum is None else val_pred_sum + pred_raw
         print(f"[p1 seed {seed}] val_rmsle {r:.5f} best_step {best_step} "
               f"steps_done {steps_done}", flush=True)
-        del model
+        del model, ckpt_buf
     ens_val = val_pred_sum / len(seeds)
     ens_rmsle = rmsle(val_y30_raw[val_idx], ens_val)
     print(f"ENSEMBLE({len(seeds)} seeds) val_rmsle {ens_rmsle:.5f} "
@@ -544,6 +757,14 @@ def main():
     if cal_secs:
         print(f"es_metric=cal cost: {len(cal_secs)} calibrations, "
               f"mean {cal_cost:.3f}s, total {sum(cal_secs):.1f}s", flush=True)
+
+    if sweep_rows and not args.smoke:   # контракт смоука: НИЧЕГО не пишется
+        sw = REPORTS_DIR / f"ckpt_sweep_{name}.json"
+        sw.write_text(json.dumps({"name": name, "seeds": seeds,
+                                  "es_metric": args.es_metric,
+                                  "eval_every": eval_every,
+                                  "rows": sweep_rows}, ensure_ascii=False, indent=1))
+        print(f"sweep -> {sw}", flush=True)
 
     if args.smoke:
         import resource
@@ -563,7 +784,9 @@ def main():
              f"hurdle bce_w{args.bce_w} aux{args.aux_w} "
              f"do{args.dropout} b{args.batch} lr{args.lr:g} wd{args.wd:g} ep{args.epochs} "
              f"eval_every={eval_every} es={args.es_metric} "
-             f"seeds={','.join(map(str, seeds))} best_steps={best_steps} "
+             + (f"ckpt_avg={args.ckpt_avg}:{args.ckpt_mode} " if args.ckpt_avg else "")
+             + (f"swa={args.swa}:{args.ckpt_mode} " if args.swa else "")
+             + f"seeds={','.join(map(str, seeds))} best_steps={best_steps} "
              f"per_seed={[round(r, 5) for r in per_seed_rmsle]} {args.notes}").strip()
     log_score(name, float(ens_rmsle), notes)
 
@@ -598,6 +821,12 @@ def main():
         # итераций масштабируется от найденного оптимума тем же множителем.
         row_ratio = len(f_anchors) / max(len(p1_anchors), 1)
         iter_mult = 1.0 + 0.7 * (row_ratio - 1.0)
+        # Усреднение точек ОБЯЗАНО повториться и здесь.  Иначе валидационные
+        # прогнозы делает усреднённая модель, а тестовые — одна последняя, и
+        # оптимизатор бленда подбирает веса под процедуру, которой на тесте нет.
+        # Валидации в фазе 2 нет, поэтому доступен только режим last — ровно
+        # поэтому он и выбран режимом по умолчанию.
+        k2 = args.swa or args.ckpt_avg
         test_sum = None
         for si, seed in enumerate(seeds):
             steps_cap = max2
@@ -606,25 +835,49 @@ def main():
                 steps_cap = min(max2, max(1, int(round(bs * iter_mult))))
                 print(f"[p2 seed {seed}] шагов {steps_cap} вместо {max2} "
                       f"(best_step {bs} x {iter_mult:.4f})", flush=True)
+            buf2: list | None = [] if k2 else None
             model2, _, _, _, steps2 = run_train(
                 args, device, seed, d_tab, xs2, tabs2, ylogs2, ybuys2,
-                max_steps=steps_cap, epochs=args.epochs, val=None, label="p2")
-            t_log = predict_log(model2, test_x, test_tab, test_idx, device, args.eval_batch)
+                max_steps=steps_cap, epochs=args.epochs, val=None, label="p2",
+                ckpt_buf=buf2, ckpt_states=bool(k2), ckpt_cap=max(1, k2) + 1)
+            if buf2:
+                sel2 = buf2[-k2:]
+                print(f"[p2 seed {seed}] {'swa' if args.swa else 'ckpt-avg'} last "
+                      f"k={len(sel2)} steps {[int(c['step']) for c in sel2]}", flush=True)
+                if args.swa:
+                    model2.load_state_dict(_avg_states([c["state"] for c in sel2]))
+                    t_log = predict_log(model2, test_x, test_tab, test_idx, device,
+                                        args.eval_batch)
+                else:
+                    acc = []
+                    for c in sel2:
+                        model2.load_state_dict(c["state"])
+                        acc.append(predict_log(model2, test_x, test_tab, test_idx,
+                                               device, args.eval_batch))
+                    t_log = _avg_log1p(acc)
+            else:
+                t_log = predict_log(model2, test_x, test_tab, test_idx, device,
+                                    args.eval_batch)
             t_raw = np.expm1(np.clip(t_log, 0, None)).astype(np.float64)
             test_sum = t_raw if test_sum is None else test_sum + t_raw
             print(f"[p2 seed {seed}] steps {steps2} test mean {t_raw.mean():.2f}", flush=True)
-            del model2
+            del model2, buf2
         ens_test = test_sum / len(seeds)
         save_preds(name, "test", uids, ens_test)
         print(f"saved test preds: mean {ens_test.mean():.2f} "
               f"nonzero>1 {(ens_test > 1).mean():.4f}", flush=True)
         test_saved = True
 
-    print(json.dumps({"name": name, "val_rmsle": round(float(ens_rmsle), 6),
-                      "per_seed": [round(float(r), 6) for r in per_seed_rmsle],
-                      "best_steps": best_steps, "test_saved": test_saved,
-                      "es_metric": args.es_metric,
-                      "cal_secs_per_eval": round(cal_cost, 3)}), flush=True)
+    out = {"name": name, "val_rmsle": round(float(ens_rmsle), 6),
+           "per_seed": [round(float(r), 6) for r in per_seed_rmsle],
+           "best_steps": best_steps, "test_saved": test_saved,
+           "es_metric": args.es_metric,
+           "cal_secs_per_eval": round(cal_cost, 3)}
+    if ckpt_on:  # ключи появляются только при включённых флагах: путь по
+        # умолчанию должен печатать ровно ту же строку, что и раньше
+        out.update({"ckpt_avg": args.ckpt_avg, "swa": args.swa,
+                    "ckpt_mode": args.ckpt_mode, "ckpt_sweep": args.ckpt_sweep})
+    print(json.dumps(out), flush=True)
 
 
 if __name__ == "__main__":
