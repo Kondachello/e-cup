@@ -324,11 +324,14 @@ def main(a, st=None):
     np.save(f'val_user_ids_{a.tag}.npy', st.uids[val_u.numpy()])  # для джойна при блендинге
     print(f'валидация: {len(val_u)} юзеров', flush=True)
 
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=max(a.pct_start,1e-3))
     ema = EMA(model, a.ema)
     if a.fixed_steps:
         a.steps, a.minutes = a.fixed_steps, 0.0
         print(f'режим переобучения: ровно {a.fixed_steps} шагов, ранней остановки нет', flush=True)
+    # расписание строится ПОСЛЕ подмены a.steps: иначе фаза переобучения (--fixed-steps)
+    # обрывает отжиг на середине (LR≈5e-4 из пика 7e-4) и тестовые модели систематически
+    # хуже парных валидационных
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=max(a.pct_start,1e-3))
     t0 = time.time(); best = (9e9, None); step = 0; retimed = False
     hist = []   # (шаг, лосс, val RMSLE, lr, минуты)
     if a.eval_only:
@@ -444,7 +447,10 @@ def main(a, st=None):
                            'pred': pred.astype(np.float64)}).sort('user_id').write_parquet(
                 f'{a.export}/{a.tag}_test.parquet')
             print(f'выгружено {a.export}/{a.tag}_test.parquet', flush=True)
-    return bestc[0]
+    # не bestc[0]: при --cal-fixed ветка подбора не выполняется и bestc не существует —
+    # NameError падал уже ПОСЛЕ записи артефактов, run_all считал прогон упавшим и не
+    # переименовывал негодный val-parquet
+    return float(rmsle_from_log(cal * lp, lt))
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()

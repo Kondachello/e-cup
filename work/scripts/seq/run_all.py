@@ -244,9 +244,21 @@ def main() -> int:
     else:
         log("4. ФАЗА B — переобучение по якорь 378, только тестовые предсказания")
         print("  Предупреждение про нарушенный зазор от train_tcn.py — ожидаемое.\n")
+        def quarantine(tag: str):
+            # _val.parquet фазы B негоден при ЛЮБОМ исходе прогона: зазор нарушен, скор
+            # завышен. Раньше переименование стояло после проверки кода выхода, и упавший
+            # после записи артефактов прогон (NameError в train_tcn при --cal-fixed)
+            # оставлял подсматривающий файл в work/preds под нормальным именем навсегда —
+            # перезапуск пропускал сид по готовому test-parquet.
+            bad = root / "work" / "preds" / f"{tag}_val.parquet"
+            if bad.exists():
+                bad.rename(bad.with_suffix(".parquet.LEAKY_DO_NOT_USE"))
+                print(f"  {tag}_val.parquet переименован: у него нарушен зазор")
+
         for s in SEEDS:
             tag, src = f"tfm2_s{s}_rt", f"tfm2_s{s}"
             if (root / "work" / "preds" / f"{tag}_test.parquet").exists():
+                quarantine(tag)
                 print(f"  {tag}: уже готов, пропускаю"); continue
             if a.dry_run:
                 print(f"  $ ... --max-tr-anchor 378 --fixed-steps <N> --cal-fixed <C> --tag {tag}")
@@ -258,12 +270,9 @@ def main() -> int:
                    "--export", str(root / "work" / "preds"),
                    "--predict", f"sub_{tag}.csv", "--no-plots"]
             t = time.time()
-            if run(cmd, logs / f"{tag}.log"): raise SystemExit(f"фаза B, сид {s}: прогон упал")
-            # её _val.parquet негоден: зазор нарушен, скор завышен
-            bad = root / "work" / "preds" / f"{tag}_val.parquet"
-            if bad.exists():
-                bad.rename(bad.with_suffix(".parquet.LEAKY_DO_NOT_USE"))
-                print(f"  {tag}_val.parquet переименован: у него нарушен зазор")
+            rc = run(cmd, logs / f"{tag}.log")
+            quarantine(tag)
+            if rc: raise SystemExit(f"фаза B, сид {s}: прогон упал")
             print(f"  {tag} готов за {(time.time()-t)/60:.1f} мин")
 
     # ---------- 5. собрать ----------

@@ -76,7 +76,10 @@ def main():
         eval_every=s.eval_every, workers=s.workers, val_users=s.val_users, ema=0.999,
         aux=0.1, calib=0.95, pct_start=0.15, min_anchor=60, abs_time=False,
         seed=s.seed, tag='x', ckpt='x.pt', predict='', eval_only=False, no_plots=True,
-        es_metric='cal', val_anchor=378, export='')
+        es_metric='cal', val_anchor=378, export='',
+        # поля, добавленные в train_tcn позже этого Namespace: без них каждое испытание
+        # падало AttributeError под общим except и свип молча писал nan
+        max_tr_anchor=0, fixed_steps=0, cal_fixed=0.0, cohort1=False)
 
     done = []
     if os.path.exists(s.out):
