@@ -52,6 +52,12 @@ python work\scripts\err_corr.py tfm3_cal
 python work\scripts\seq\run_all.py --data C:\ozon\tensor
 ```
 
+Если тензора ещё нет (он в `.gitignore`, после клона его не будет) — соберёт сам:
+
+```powershell
+python work\scripts\seq\run_all.py --data tensor --train-parquet C:\ozon\train.parquet
+```
+
 Сам поставит маску когорты, прогонит фазу A (три сида, зазор 30, `--es-metric cal`),
 вытащит из результатов число шагов и усадку, прогонит фазу B (переобучение по
 якорь 378 для теста) и сложит всё в `_to_kosta/`. Прерывать можно в любой момент —

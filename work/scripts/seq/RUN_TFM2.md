@@ -21,13 +21,40 @@
 `якорь+1..якорь+30`, а тензор кончается на дне 408. Максимальный валидный
 валидационный якорь — 378.
 
-## Ноль. Один раз
+## Ноль. Тензор
+
+Тензор в `.gitignore` (2.6 ГБ), после чистого клона его нет. Варианта два.
+
+**Если тензор уже собран** — просто указать на него:
+
+```powershell
+python work\scripts\seq\run_all.py --data C:\ozon\tensor
+```
+
+**Если нет** — раннер соберёт сам, нужен только `train.parquet`:
+
+```powershell
+python work\scripts\seq\run_all.py --data tensor --train-parquet C:\ozon\train.parquet
+```
+
+Сборка занимает около 12 минут и требует 2.6 ГБ на диске; раннер проверит место
+заранее и сверит форму с ожидаемой 250000 x 409 x 10. `fix_gmv.py` при этом не
+нужен — он чинит тензоры, собранные старой версией, где gmv писался в fp16.
+
+Вручную то же самое:
+
+```powershell
+python work\scripts\seq\build_tensor.py --src train.parquet --out tensor
+```
+
+## Один. Маска когорты
 
 ```powershell
 python work\scripts\seq\make_valid3.py --data tensor
 ```
 
 Допишет маску `valid_anchor3` в `tensor/meta.npz`, сам тензор не тронет.
+Раннер делает это сам, если маски ещё нет.
 
 ## Фаза A — измерение, зазор 30 дней
 

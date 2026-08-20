@@ -33,6 +33,12 @@ from pathlib import Path
 
 import numpy as np
 
+# Windows: при перенаправлении вывода в файл Python берёт кодировку локали
+# (cp866/cp1251), и первое же тире в сообщении роняет скрипт UnicodeEncodeError.
+for _s in (sys.stdout, sys.stderr):
+    try: _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass
+
 SEEDS = (1, 2, 3)
 SHRINK = [1.0, 0.97, 0.95, 0.93, 0.9, 0.87, 0.85]   # как в train_tcn.py
 ANCHOR_RATIO = 1.09          # 349 обучающих срезов против 319
@@ -49,8 +55,12 @@ def run(cmd, logfile: Path) -> int:
     print("  $ " + " ".join(str(c) for c in cmd), flush=True)
     with open(logfile, "w", encoding="utf-8", errors="replace") as f:
         f.write("$ " + " ".join(str(c) for c in cmd) + "\n\n"); f.flush()
+        # Дочерний процесс тоже печатает кириллицу. Когда его stdout — труба, он
+        # пишет в кодировке локали, и разбор как UTF-8 дал бы кашу в логах.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, encoding="utf-8", errors="replace", bufsize=1)
+                             text=True, encoding="utf-8", errors="replace", bufsize=1,
+                             env=env)
         for line in p.stdout:
             sys.stdout.write(line); sys.stdout.flush(); f.write(line)
         return p.wait()
@@ -76,7 +86,12 @@ def best_shrink(tag: str, root: Path) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", required=True, help="папка тензора (seq.f16, gmv.f32, ord.f16, meta.npz)")
+    ap.add_argument("--data", required=True,
+                    help="папка тензора (seq.f16, gmv.f32, ord.f16, meta.npz); "
+                         "если её нет — будет собрана из --train-parquet")
+    ap.add_argument("--train-parquet", default="",
+                    help="исходный train.parquet; нужен только если тензор ещё не собран. "
+                         "Пусто = искать рядом с --data и в корне репозитория")
     ap.add_argument("--minutes", type=float, default=55, help="бюджет одного прогона фазы A")
     ap.add_argument("--out", default="_to_kosta", help="куда сложить результат")
     ap.add_argument("--skip-b", action="store_true", help="только фаза A")
@@ -95,17 +110,77 @@ def main() -> int:
         raise SystemExit(f"запускать из КОРНЯ репозитория; сейчас {root}, нет {seq/'train_tcn.py'}")
     need = ["seq.f16", "gmv.f32", "ord.f16", "meta.npz"]
     miss = [f for f in need if not (data / f).exists()]
-    if miss: raise SystemExit(f"в {data} нет: {', '.join(miss)}. Сначала build_tensor.py")
-    print(f"  тензор: {data}  ({sum((data/f).stat().st_size for f in need)/2**30:.2f} ГБ)")
-    try:
+    if miss:
+        # Тензор в .gitignore (2.6 ГБ), после чистого клона его нет. Собираем.
+        print(f"  тензора нет ({', '.join(miss)}) — нужна сборка")
+        try:
+            import pyarrow  # noqa: F401
+        except ImportError:
+            if not a.dry_run:
+                raise SystemExit("для сборки тензора нужен pyarrow: pip install pyarrow")
+            print("  НЕТ pyarrow — нужен build_tensor.py (--dry-run: продолжаю)")
+        src = Path(a.train_parquet) if a.train_parquet else None
+        if src is None:
+            for c in (data.parent / "train.parquet", root / "train.parquet",
+                      data / ".." / ".." / "train.parquet"):
+                if c.exists(): src = c.resolve(); break
+        if src is None or not src.exists():
+            raise SystemExit(
+                "не найден train.parquet. Укажите путь: --train-parquet C:\\ozon\\train.parquet\n"
+                "Либо укажите --data на уже собранный тензор (у вас он был в C:\\ozon\\tensor).")
+        free = shutil.disk_usage(data.parent if data.parent.exists() else root).free / 2**30
+        print(f"  исходник: {src} ({src.stat().st_size/2**20:.0f} МБ)")
+        print(f"  тензор займёт ~2.6 ГБ, свободно {free:.1f} ГБ, сборка занимает ~12 минут")
+        if free < 3.0:
+            raise SystemExit(f"мало места: {free:.1f} ГБ, нужно минимум 3 ГБ")
+        if a.dry_run:
+            print(f"  $ {py} {seq/'build_tensor.py'} --src {src} --out {data}")
+        else:
+            data.mkdir(parents=True, exist_ok=True)
+            t = time.time()
+            if run([py, str(seq / "build_tensor.py"), "--src", str(src), "--out", str(data)],
+                   logs / "build_tensor.log"):
+                raise SystemExit("build_tensor.py упал")
+            print(f"  тензор собран за {(time.time()-t)/60:.1f} мин")
+            miss = [f for f in need if not (data / f).exists()]
+            if miss: raise SystemExit(f"после сборки всё ещё нет: {', '.join(miss)}")
+    if not a.dry_run or not miss:
+        print(f"  тензор: {data}  ({sum((data/f).stat().st_size for f in need)/2**30:.2f} ГБ)")
+        mm = np.load(data / "meta.npz")
+        shape = (int(mm["n_users"]), int(mm["n_days"]), int(mm["n_ch"]))
+        print(f"  форма: {shape[0]} x {shape[1]} x {shape[2]}")
+        if shape[0] != 250000 or shape[1] < 409:
+            print(f"  ВНИМАНИЕ: ожидалось 250000 x 409 x 10 — тензор собран не из того файла?")
+        del mm
+    # Проверяем ВСЕ пакеты сразу. polars нужен train_tcn.py только на выгрузке
+    # предсказаний, в самом конце: без этой проверки прогон отработал бы 55 минут
+    # и упал бы на последней строке.
+    missing = []
+    for mod, why in (("numpy", "везде"), ("polars", "выгрузка предсказаний в конце прогона"),
+                     ("torch", "обучение")):
+        try:
+            m = __import__(mod)
+            v = getattr(m, "__version__", "?")
+            print(f"  {mod} {v}  ({why})")
+        except ImportError:
+            print(f"  НЕТ {mod}  — нужен: {why}")
+            missing.append(mod)
+    if "torch" not in missing:
         import torch
-        print(f"  torch {torch.__version__}, CUDA доступна: {torch.cuda.is_available()}")
+        print(f"  CUDA доступна: {torch.cuda.is_available()}")
         if not torch.cuda.is_available():
             print("  ВНИМАНИЕ: CUDA не видна, обучение пойдёт на CPU и займёт сутки")
+    try:
+        import matplotlib  # noqa: F401
+        print("  matplotlib есть (графики прогона)")
     except ImportError:
-        msg = "нет torch. pip install torch --index-url https://download.pytorch.org/whl/cu128"
+        print("  matplotlib нет — графики будут пропущены, на результат не влияет")
+    if missing:
+        msg = ("не хватает пакетов: " + ", ".join(missing) + "\n"
+               "  pip install numpy polars pyarrow matplotlib\n"
+               "  pip install torch --index-url https://download.pytorch.org/whl/cu128")
         if not a.dry_run: raise SystemExit(msg)
-        print(f"  {msg}  (--dry-run: продолжаю)")
+        print(f"  {msg}\n  (--dry-run: продолжаю)")
     free = shutil.disk_usage(root).free / 2**30
     print(f"  свободно на диске: {free:.1f} ГБ")
     if free < 5: print("  ВНИМАНИЕ: меньше 5 ГБ, чекпоинты могут не поместиться")
@@ -119,8 +194,18 @@ def main() -> int:
     elif a.dry_run:
         print(f"  $ {py} {seq/'make_valid3.py'} --data {data}")
     else:
+        # make_valid3.py перезаписывает meta.npz целиком и не атомарно.
+        # Обрыв на записи убил бы тензор и стоил бы 12 минут пересборки.
+        bak = data / "meta.npz.bak"
+        if not bak.exists():
+            print(f"  резервная копия meta.npz ({(data/'meta.npz').stat().st_size/2**20:.0f} МБ)...")
+            shutil.copy2(data / "meta.npz", bak)
         if run([py, str(seq / "make_valid3.py"), "--data", str(data)], logs / "make_valid3.log"):
-            raise SystemExit("make_valid3.py упал")
+            shutil.copy2(bak, data / "meta.npz")
+            raise SystemExit("make_valid3.py упал, meta.npz восстановлен из копии")
+        if "valid_anchor3" not in np.load(data / "meta.npz").files:
+            shutil.copy2(bak, data / "meta.npz")
+            raise SystemExit("make_valid3.py отработал, но valid_anchor3 не появился; meta.npz восстановлен")
     del m
 
     # ---------- 2. фаза A ----------
