@@ -8,6 +8,7 @@ work/features_sub/
 work/preds/
 work/models/
 work/queue/
+work/lb_cache.npz
 submissions/
 prev_solutions/
 solution_lbmix2/artifacts/
@@ -22,3 +23,7 @@ __pycache__/
 work/reports/*.log
 work/reports/queue_runner.out
 baseline-seacrh-ltv.ipynb
+
+# kaggle-трек: локальные артефакты сборки и смоука (0.7 ГБ, восстанавливаются за 45с)
+work/kaggle/run/
+work/colab/out/hist_*

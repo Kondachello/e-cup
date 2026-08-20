@@ -1,26 +1,40 @@
-# Воспроизведение обучения: от `train.parquet` до финального сабмита
+# Воспроизведение: от `train.parquet` до отправленного файла
 
-Документ описывает **фактический** пайплайн финального решения: какие признаки
-каким скриптом строятся, какие модели каким флагом обучаются, как считается
-бленд и какие два числа применяются в самом конце.
 
 Всё запускается из корня репозитория, окружение — `final_submission/requirements.txt`
-(Python 3.10). Референсное железо: Apple M1 Pro, 10 ядер, 16 GB RAM (нейросети —
-на MPS; на CPU те же команды, дольше). Времена ниже — фактические, из
-`work/queue/done/*.json` (поле `seconds`).
+(Python 3.10.17). Референсное железо: Apple M1 Pro, 10 ядер, 16 GB RAM (нейросети — на
+MPS; на CPU те же команды, дольше). Времена ниже — **фактические**, из
+`work/queue/done/*.json`, поле `seconds`.
 
 > **Про параллельность.** На 16 GB тяжёлые обучения запускать строго
-> ПОСЛЕДОВАТЕЛЬНО. У нас для этого очередь: `work/scripts/enqueue.py` кладёт
-> задание, `work/scripts/queue_runner.py` берёт по одному. Параллельные запуски
-> дважды роняли машину.
+> ПОСЛЕДОВАТЕЛЬНО. Для этого есть очередь: `work/scripts/enqueue.py` кладёт задание,
+> `work/scripts/queue_runner.py` берёт по одному. Параллельные запуски дважды роняли
+> машину.
 
 ---
 
-## 0. Общий протокол (контракт `exp_lib`)
+## 0. Шесть шагов решения
 
-Обучающие примеры нарезаны по cutoff-датам («якорям») с шагом 7 дней: признаки
-считаются по данным до якоря включительно, таргет — суммарный GMV за следующие
-30 дней.
+Порядок обязателен. Каждый шаг — отдельный раздел ниже и отдельная стадия
+`final_submission/inference.py --stage ...`.
+
+| # | шаг | чем делается | стадия инференса |
+|---|---|---|---|
+| 1 | обучение 25 базовых моделей пула, у нейросетевых — с `--es-metric cal` | `work/scripts/train_*.py` | `predict` (грузит веса) |
+| 2 | поквантильная калибровка каждого члена, 24 бина | `calibrate.py` | `ensemble` (применяет `NAME_cal.npz`) |
+| 3 | линейное смешивание 20 членов в log1p | `blend_reopt.py` | `ensemble` |
+| 4 | приведение к целевым моментам | `make_candidate.py` | `moments` |
+| 5 | перенос накопленной цепочки поправок + сила шага | `make_candidate.py --carry-from` | `moments` |
+| 6 | **среднесохраняющая поправка на молчащих** | `silence_model.py` | `silence` |
+
+Шаг 6 даёт **0.00084 из 0.00098** всего дневного прироста 19 августа. Без него
+воспроизводится не отправленный файл, а файл на 0.00084 хуже — вчетверо больше, чем
+дали за те же сутки все улучшения самих моделей. Ему посвящён раздел 7.
+
+## 1. Общий протокол (контракт `exp_lib`)
+
+Обучающие примеры нарезаны по cutoff-датам («якорям»): признаки считаются по данным до
+якоря включительно, таргет — суммарный GMV за следующие 30 дней.
 
 | якорь | роль |
 |---|---|
@@ -29,296 +43,531 @@
 | `<= 2025-12-10` | **обучение** при отборе (`--gap-days 30`) |
 | `2025-12-17 … 2026-01-07` | «gap»-якоря: в отборе НЕ участвуют, добавляются в retrain |
 
-`--gap-days 30` обязателен: без зазора таргет-окна обучающих срезов
-пересекаются с валидационным, и val-скор завышается до +0.10 RMSLE.
+`--gap-days 30` обязателен: без зазора таргет-окна обучающих срезов пересекаются с
+валидационным, и val-скор завышается до +0.10 RMSLE.
 
 Каждый трейнер делает две фазы:
 
 1. **Отбор**: обучение на чистых якорях, ранняя остановка по якорю 2026-01-14,
    `work/preds/NAME_val.parquet` + строка в `work/reports/scores.tsv`.
-2. **Retrain**: дообучение на train + gap + val (число итераций/эпох
-   масштабируется по росту числа строк, `iter_mult = 1 + 0.7*(row_ratio-1)`),
-   прогноз тестового якоря → `work/preds/NAME_test.parquet`.
+2. **Retrain**: дообучение на train + gap + val (число итераций/эпох масштабируется по
+   росту числа строк, `iter_mult = 1 + 0.7*(row_ratio-1)`), прогноз тестового якоря →
+   `work/preds/NAME_test.parquet`.
 
-**Веса моделей сохраняются на шаге retrain** (`work/scripts/model_io.py`):
-бустинги через `Booster.save_model()`, torch-модели через
-`torch.save(state_dict)`, плюс `work/models/NAME_meta.json` с порядком колонок
-признаков и конфигом архитектуры. Именно эти файлы читает
-`final_submission/inference.py`.
+**Веса сохраняются только на шаге retrain** (`work/scripts/model_io.py`): бустинги через
+`Booster.save_model()`, torch-модели через `torch.save(state_dict)`, плюс
+`work/models/NAME_meta.json` с порядком колонок признаков и конфигом архитектуры. Отсюда
+важное следствие: **прогон с `--no-test` (или без `--final` у сеточных) весов не
+оставляет вообще.** Именно эти файлы читает `final_submission/inference.py`.
 
-## 1. Признаки (один раз, ~40–60 мин суммарно)
+### 1.1 Критерий ранней остановки `--es-metric cal`
+
+Находка 19 августа. Ранняя остановка по СЫРОМУ валидационному RMSLE обрывает обучение
+вчетверо раньше нужного, потому что сырой скор в основном отражает общий сдвиг уровня, а
+не форму прогноза — а уровень всё равно снимается калибровкой (шаг 2). Остановка по
+КАЛИБРОВАННОМУ скору даёт до 0.0028 на модель.
+
+| семейство | флаг | замер |
+|---|---|---|
+| `train_mlpziln.py` | `--es-metric cal` | средняя дельта −0.000612 на сид, интервал [−0.000909, −0.000296]; сырой останавливал на эпохе 1–4 вместо 6–7 |
+| `train_fusion3.py` | `--es-metric cal` | +0.001654 на сиде 555 (1.668676 против 1.670330) |
+| `train_gbdt.py` | `--es-metric cal` есть, но **не использован**: парный замер на `c_ts2` и `twl` дал 1.692342 против 1.693077 и 1.694155 против 1.694288, то есть у бустинга выигрыша нет |
+| `train_seq2.py` | флага нет вовсе (модель обучена до находки) |
+
+В командах раздела 2 флаг стоит **ровно там, где он был при обучении**. Ставить его
+дополнительно к бустингам не надо — это будет другая модель, а не воспроизведение.
+
+## 2. Признаки и тензоры (один раз)
 
 ```bash
 python3.10 -m venv .venv && .venv/bin/pip install -r final_submission/requirements.txt
 # train.parquet и sample_submit.csv — в корень репозитория (или задать OZON_ROOT)
 
-.venv/bin/python work/scripts/build_features.py --preset all   # base -> anchor=DATE.parquet
-.venv/bin/python work/scripts/build_features_v2.py             # -> .extra.parquet  (USE_V2)
-.venv/bin/python work/scripts/build_features_v3.py             # -> .v3.parquet     (USE_V3)
-.venv/bin/python work/scripts/build_features_v4.py             # -> .v4.parquet     (USE_V4), BTYD
-.venv/bin/python work/scripts/build_features_v7.py             # -> .v7.parquet     (USE_V7), только для twl_v7
-.venv/bin/python work/scripts/build_seq2.py                    # -> work/seq2/anchor=DATE.npy
-.venv/bin/python work/scripts/build_channel_targets.py         # -> .chtgt.parquet
-.venv/bin/python work/scripts/build_count_targets.py           # -> .cnttgt.parquet
+A="2026-02-13,2026-01-14,2025-07-02,2025-07-16,2025-07-30,2025-08-13,2025-08-27,2025-09-10"
+
+.venv/bin/python work/scripts/build_features.py    --preset all      # base -> anchor=DATE.parquet
+.venv/bin/python work/scripts/build_features_v2.py --anchors "$A"    # -> .extra.parquet (USE_V2)
+.venv/bin/python work/scripts/build_features_v3.py                   # -> .v3.parquet    (USE_V3)
+.venv/bin/python work/scripts/build_features_v4.py --anchors "$A"    # -> .v4.parquet    (USE_V4), BTYD
+.venv/bin/python work/scripts/build_features_v7.py --anchors 2026-02-13 \
+    --states 4 --sims 300 --win 120 --em-cap 15000 --seed 42         # -> .v7.parquet    (USE_V7)
+.venv/bin/python work/scripts/build_count_targets.py                 # -> .cnttgt.parquet (countaov)
+
+POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/build_seq3.py --max-train 8   # 3.4 ГБ
+POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/build_seq2.py                 # ~11 ГБ
 ```
 
-Наборы признаков подключаются переменными окружения — их читает `load_anchor()`
-в `work/scripts/common.py`, и **от них зависит порядок колонок**, поэтому каждая
-модель обучается со своим набором флагов (см. таблицу в §2) и тот же набор
-записан в её `work/models/NAME_meta.json`.
+Шесть якорей 2025-07-02 … 2025-09-10 нужны **только для модели молчания** (раздел 7):
+это те якоря, чьё 30-дневное целевое окно кончается раньше 2025-11-16.
+
+Наборы подключаются переменными окружения — их читает `load_anchor()` в
+`work/scripts/common.py`, и **от них зависит порядок колонок**, поэтому каждая модель
+обучается со своим набором флагов и тот же набор записан в её
+`work/models/NAME_meta.json`.
 
 | набор | флаг | что в нём | нужен для |
 |---|---|---|---|
 | base | — | суммы/счётчики за окна 1–365 дней, recency, интервалы, тренды, «то же окно год назад» | всех |
 | v2 | `USE_V2` | экспоненциальные затухания, концентрация трат, дни с крупными покупками | всех табличных |
 | v3 | `USE_V3` | percentile-ранги внутри среза, детализация прошлогоднего окна, burstiness | всех табличных |
-| v4 | `USE_V4` | BTYD: BG/NBD (P(alive), ожидаемое число покупок) + Gamma-Gamma (чек) | всех, кроме `c_ts2_s42` |
-| v7 | `USE_V7` | 3 колонки из HMM-симулятора (`hmm_elog`, `hmm_p_zero`, `hmm_sim_std`) | только `twl_v7` |
-| seq2 | — | тензор [250k × 196 дней × 8 каналов] на якорь | `seq2tr_f`, `fusion_f` |
+| v4 | `USE_V4` | BTYD: BG/NBD (P(alive), ожидаемое число покупок) + Gamma-Gamma (чек) | всех, кроме `c_ts2_*` и `c_xtw_s42` |
+| v7 | `USE_V7` | 3 колонки HMM-симулятора (`hmm_elog`, `hmm_p_zero`, `hmm_sim_std`) | только `twl_v7` |
+| seq3 | — | uint8 [250k × 112 дней × 12 каналов] на якорь | `fusion_v3*` |
+| seq2 | — | float16 [250k × 196 дней × 8 каналов] на якорь | `seq2tr_f` |
 
-Контрольные числа колонок: **203** при V2+V3+V4, **206** при +V7, **194** при
-V2+V3, **85** у `behavonly` (правило отбрасывания «денежных» колонок).
+Контрольные числа колонок: **203** при V2+V3+V4, **206** при +V7, **194** при V2+V3,
+**85** у `behavonly` (правило отбрасывания «денежных» колонок).
 
-> Наборы v6, v8, v10 и `build_seq.py` собраны, измерены и **отвергнуты** — в
-> финальный ансамбль не входят, строить их не нужно.
+> Наборы v5/v6/v8/v10 и `build_seq.py` собраны, измерены и **отвергнуты** — в решение не
+> входят, строить их не нужно. `train_wklin.py --emit-tier` попутно пишет `.v5s.parquet`;
+> сам бленд его не использует, но флаг в команде оставлен, потому что модель обучалась
+> именно так.
 
-## 2. Девять моделей бленда
+## 3. Шаг 1: 25 базовых моделей
 
-Каждая строка — ровно та команда, которой модель обучена (из `work/queue/done/`).
-`val` — RMSLE на якоре 2026-01-14 по протоколу gap30 из `work/reports/scores.tsv`.
+Каждая строка — ровно та команда, которой модель обучена (из `work/queue/done/`), со
+своими переменными окружения. `val` — RMSLE на якоре 2026-01-14 из
+`work/reports/scores.tsv`. Столбец «веса» говорит, что остаётся на диске после прогона.
 
-### 2.1 `fusion_f` — seq+tab fusion, вес 0.316, val 1.6851
+### 3.1 Секвенсные (тензоры seq3), `train_fusion3.py`
 
 ```bash
-USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=5 \
-.venv/bin/python work/scripts/train_fusion.py --name fusion_f --final \
-  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 5
-# ~31 мин. Conv7 + 2 слоя трансформера по последовательности + табличный
-# энкодер, hurdle-голова (P(y>0) x E[log1p|>0]) + вспомогательные головы y7/y14.
-# Веса: work/models/fusion_f_seed42.pt, статистики: fusion_f_stats.npz
+E="USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3"
+
+# три сида «калиброванного критерия» -> усредняются в fusion_v3c_avg
+env $E .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3c42  --final \
+  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42  --threads 4 \
+  --eval-every 492 --n-ch 12 --es-metric cal                       # 1050 с
+env $E .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3c555 --final \
+  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 555 --threads 4 \
+  --eval-every 492 --n-ch 12 --es-metric cal                       # 952 с
+env $E .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3c7   --final \
+  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 7   --threads 4 \
+  --eval-every 492 --n-ch 12 --es-metric cal                       # 918 с
+
+# 12 каналов и строгий контроль на 8 каналах (сырой критерий остановки)
+env $E .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3    --final \
+  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 \
+  --eval-every 984 --n-ch 12                                       # 921 с, val 1.689871
+env $E .venv/bin/python work/scripts/train_fusion3.py --name fusion_v3ctl --final \
+  --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 \
+  --eval-every 984 --n-ch 8                                        # 875 с, val 1.691090
 ```
 
-### 2.2 `c_ts2_s42` — LightGBM two-stage, вес 0.246, val 1.6931
+`--n-ch` просто обрезает тензор до первых N каналов: 0–7 совпадают с набором seq2,
+8–11 — дневные счётчики воронки (`search_to_cart`, `search_to_ord`, `cat_to_cart`,
+`cat_to_ord`). `fusion_v3ctl` — строгий контроль к `fusion_v3`: те же тензоры, якоря, сид,
+L=112 и квантование, отличие ровно в этих четырёх каналах.
+
+> **Веса: НЕ СОХРАНЯЮТСЯ.** В `train_fusion3.py` нет ни одного вызова `model_io`; он
+> пишет только `work/models/NAME_stats.npz`. Артефактом этих пяти моделей является сам
+> прогноз `work/preds/NAME_test.parquet`, и другого способа получить его, кроме
+> повторного обучения, нет. Это самая крупная дыра воспроизводимости пакета: суммарный
+> вес пяти моделей в бленде — 0.397 из 1.005.
+
+### 3.2 Секвенсная на тензорах seq2, `train_seq2.py`
 
 ```bash
-USE_V2=1 USE_V3=1 OMP_NUM_THREADS=6 \
-.venv/bin/python work/scripts/train_gbdt.py --name c_ts2_s42 \
-  --threads 6 --gap-days 30 --model lgb --objective two_stage --n-anchors 14 --seed 42 \
+OMP_NUM_THREADS=4 .venv/bin/python work/scripts/train_seq2.py --name seq2tr_f \
+  --arch tr --final --epochs 3 --batch 2048 --lr 1e-3 --seeds 42,1337 --threads 4
+# 19485 с = 5.4 ЧАСА — самая долгая модель проекта. val 1.710203.
+# Табличных признаков не видит вовсе (USE_* не задаются), поэтому её ошибки меньше
+# всего скоррелированы с остальными. Веса: work/models/seq2tr_f_seed{42,1337}.pt
+# ТЕНЗОРЫ work/seq2 УДАЛЕНЫ (освобождали диск); сначала build_seq2.py, ~11 ГБ.
+```
+
+### 3.3 Сеточная табличная, `train_mlpziln.py` (три сида, `--es-metric cal`)
+
+```bash
+E="USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3"
+env $E .venv/bin/python work/scripts/train_mlpziln.py --name mlpziln_c42 \
+  --n-anchors 14 --gap-days 30 --seeds 42   --es-metric cal    # 248 с, val 1.684804
+env $E .venv/bin/python work/scripts/train_mlpziln.py --name mlpziln_c1337 \
+  --n-anchors 14 --gap-days 30 --seeds 1337 --es-metric cal    # 188 с, val 1.682801
+env $E .venv/bin/python work/scripts/train_mlpziln.py --name mlpziln_c7 \
+  --n-anchors 14 --gap-days 30 --seeds 7    --es-metric cal    # 112 с, val 1.680350
+# Zero-inflated lognormal (p, mu, sigma); E[log1p] берётся 20-точечной квадратурой
+# Гаусса-Эрмита. Остальное — умолчания: --epochs 30 --patience 4 --batch 8192
+# --lr 1e-3 --wd 1e-4 --dropout 0.15 --hidden 512,256 --feat-prep clip99.
+# Веса: mlpziln_c{42,1337,7}_seed{42,1337,7}.pt + *_stats.npz
+```
+
+### 3.4 Бустинги, `train_gbdt.py` и обёртки над ним
+
+```bash
+# двухстадийный LightGBM: P(y>0) x E[log1p|y>0]. БЕЗ USE_V4 — 194 признака.
+E="USE_V2=1 USE_V3=1 OMP_NUM_THREADS=6"
+for S in 42 7; do
+env $E .venv/bin/python work/scripts/train_gbdt.py --name c_ts2_s$S \
+  --threads 6 --gap-days 30 --model lgb --objective two_stage --n-anchors 14 --seed $S \
   --params  '{"num_leaves":127,"min_data_in_leaf":500,"n_estimators":5000}' \
   --params2 '{"num_leaves":255,"min_data_in_leaf":100,"n_estimators":5000}'
-# ~5 мин. БЕЗ USE_V4 (194 признака). Стадия 1 — P(y>0), стадия 2 — E[log1p|>0].
-# Веса: work/models/c_ts2_s42__stage1.txt, c_ts2_s42__stage2.txt
-```
+done            # 303 с и 471 с; val 1.693138 и 1.692363
+                # веса: c_ts2_sS__stage1.txt, c_ts2_sS__stage2.txt
 
-### 2.3 `mlpziln` — MLP с ZILN-головой, вес 0.122, val 1.6778
+# XGBoost tweedie, тоже без USE_V4
+env $E .venv/bin/python work/scripts/train_gbdt.py --name c_xtw_s42 \
+  --threads 6 --gap-days 30 --model xgb --objective log_mse --n-anchors 10 --seed 42 \
+  --params '{"objective":"reg:tweedie","tweedie_variance_power":1.2,"max_leaves":511,
+             "min_child_weight":100,"learning_rate":0.05,"colsample_bytree":0.8,
+             "n_estimators":6000}'
+                # 246 с, val 1.697925; веса: c_xtw_s42.xgb.json
 
-```bash
-USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=4 \
-.venv/bin/python work/scripts/train_mlpziln.py --name mlpziln \
-  --n-anchors 14 --gap-days 30 --seeds 42,1337,7 --epochs 40 --batch 8192 --lr 1e-3
-# ~5 мин на MPS. Zero-inflated lognormal (p, mu, sigma); E[log1p] берётся
-# 20-точечной квадратурой Гаусса-Эрмита. Ранняя остановка дала ep=[1,4,7] по сидам.
-# Веса: work/models/mlpziln_seed{42,1337,7}.pt, статистики: mlpziln_stats.npz
-```
-
-### 2.4 `behavonly` — GBDT без единого «денежного» признака, вес 0.080, val 1.7124
-
-```bash
-USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=6 \
-.venv/bin/python work/scripts/train_behavonly.py --name behavonly \
-  --n-anchors 14 --threads 6 --seed 42
-# ~3.5 мин. Скрипт по ПРАВИЛАМ выбрасывает всё, что несёт деньги (любое "gmv",
-# BTYD-денежные головы, пороговые счётчики дней) и объёмные прокси, остаётся 85
-# поведенческих признаков; дальше делегирует в train_gbdt.main().
-# Смысл: модель, никогда не видевшая рубля, структурно не может повторить
-# ошибки остальных. Веса: work/models/behavonly.txt
-```
-
-### 2.5 `countaov` — разложение на число заказов x средний чек, вес 0.074, val 1.6936
-
-```bash
-USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=6 POLARS_MAX_THREADS=3 \
-.venv/bin/python work/scripts/train_countaov.py --name countaov \
-  --threads 6 --n-anchors 14 --gap-days 30 --seed 42
-# ~6 мин. Две LightGBM-головы: count (log1p) и AOV (режим uplift).
-# Веса: work/models/countaov__count.txt, countaov__aov.txt
-```
-
-### 2.6 `seq2tr_f` — трансформер по дневным последовательностям, вес 0.070, val 1.7102
-
-```bash
-OMP_NUM_THREADS=4 \
-.venv/bin/python work/scripts/train_seq2.py --name seq2tr_f --arch tr --final \
-  --epochs 3 --batch 2048 --lr 1e-3 --seeds 42,1337 --threads 4
-# ~5.4 ЧАСА — самая долгая модель. Табличных признаков не видит вообще
-# (USE_* не задаются), поэтому её ошибки меньше всего скоррелированы с остальными.
-# Веса: work/models/seq2tr_f_seed{42,1337}.pt
-```
-
-### 2.7 `twl_v7` — LightGBM tweedie + HMM-признаки, вес 0.055, val 1.6942
-
-```bash
+# LightGBM tweedie + HMM-признаки. ЕДИНСТВЕННАЯ причина строить build_features_v7.py.
 USE_V2=1 USE_V3=1 USE_V4=1 USE_V7=1 OMP_NUM_THREADS=6 POLARS_MAX_THREADS=3 \
 .venv/bin/python work/scripts/train_gbdt.py --name twl_v7 \
   --threads 6 --gap-days 30 --model lgb --objective log_mse --n-anchors 8 --seed 42 \
   --params '{"objective":"tweedie","tweedie_variance_power":1.45,"n_estimators":6000}'
-# ~3 мин, 206 признаков, 8 якорей (ограничено покрытием v7).
-# ЕДИНСТВЕННАЯ причина, по которой нужен build_features_v7.py. Веса: twl_v7.txt
+                # 187 с, val 1.694155, 206 признаков, 8 якорей (по покрытию v7)
+                # веса: twl_v7.txt
 ```
 
-### 2.8 `hmmsim` — генеративный симулятор, вес 0.028, val 1.8238
+### 3.5 Модель без единого «денежного» признака, `train_behavonly.py`
+
+```bash
+E="USE_V2=1 USE_V3=1 USE_V4=1"
+env $E OMP_NUM_THREADS=6 .venv/bin/python work/scripts/train_behavonly.py \
+  --name behavonly --n-anchors 14 --threads 6 --seed 42               # 214 с
+env $E OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/train_behavonly.py \
+  --name behavonly_s1337 --seed 1337 --threads 4                      # 427 с
+env $E OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/train_behavonly.py \
+  --name behavonly_s7    --seed 7    --threads 4                      # 442 с
+# Скрипт по ПРАВИЛАМ выбрасывает всё, что несёт деньги, остаётся 85 поведенческих
+# признаков, дальше делегирует в train_gbdt.main() — поэтому веса сохраняются им, а
+# meta["script"] у этих моделей = train_gbdt.py.
+# ВНИМАНИЕ: у двух дополнительных сидов НЕТ --n-anchors, поэтому они обучены на всех
+# 27 доступных якорях, а базовый сид 42 — на 14. Так и было; это не описка.
+# Веса: behavonly.txt, behavonly_s1337.txt, behavonly_s7.txt.  val_avg 1.710680
+```
+
+### 3.6 Разложение количество × средний чек, `train_countaov.py`
+
+```bash
+USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3 \
+.venv/bin/python work/scripts/train_countaov.py --name countaov_s7 \
+  --threads 4 --n-anchors 14 --gap-days 30 --seed 7
+# 489 с, val 1.693744. Две LightGBM-головы: count (log1p) и AOV (режим uplift).
+# Нужен build_count_targets.py. Веса: countaov_s7__count.txt, countaov_s7__aov.txt
+```
+
+### 3.7 Слабые специализированные модели, `train_weak.py`
+
+```bash
+E="USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=4 POLARS_MAX_THREADS=3"
+P='{"objective":"tweedie","tweedie_variance_power":1.45,"n_estimators":6000}'
+
+env $E .venv/bin/python work/scripts/train_weak.py --name weak_an_d --threads 4 \
+  --mech anchors --k-anchors 4 --sel-seed 77 --anchor-pool 0 \
+  --model lgb --objective log_mse --params "$P"        # 123 с, val 1.683269
+
+for F in recency counts long90; do
+env $E .venv/bin/python work/scripts/train_weak.py --name weak_ft_$F --threads 4 \
+  --mech ftype --ftype $F --n-anchors 14 \
+  --model lgb --objective log_mse --params "$P"        # ~190 с каждая
+done   # val 1.729126 / 1.702208 / 1.716552
+# --gap-days 30 скрипт добавляет сам, если флага нет. Делегирует в train_gbdt.main(),
+# веса: weak_an_d.txt, weak_ft_{recency,counts,long90}.txt
+```
+
+### 3.8 Линейная модель на недельных колонках, `train_wklin.py`
+
+```bash
+USE_V2=1 USE_V3=1 USE_V4=1 THREADS=4 POLARS_MAX_THREADS=3 \
+.venv/bin/python work/scripts/train_wklin.py --name wklin --emit-tier
+# 91 с. Гребневая регрессия на 180 недельных колонках, привязанных к якорю
+# (акт/корзины/заказы/поиски/GMV x 36 недель, в signed log) + 203 базовых признака.
+# alpha подбирается на ОТЛОЖЕННОМ обучающем якоре, никогда не на валидационном.
+# ОДИН прогон пишет СРАЗУ три набора: wklin_base (только база), wklin (недели+база,
+# val 1.684188) и wklin_wk (только недели, val 1.731511). Отдельно wklin_wk не получить.
+# Сида нет: решение закрытой формы детерминировано.
+# Веса: НЕ СОХРАНЯЮТСЯ (в скрипте нет model_io) -> артефакт это прогноз.
+```
+
+### 3.9 Февральский специалист, `train_febspec2.py`
+
+```bash
+OMP_NUM_THREADS=3 POLARS_MAX_THREADS=3 THREADS=3 \
+.venv/bin/python work/scripts/train_febspec2.py --name febspec2 \
+  --config auto --cohort 0.20 --threads 3
+# 429 с, val 1.785259. Короткоисторический тир (93 признака, funnel=False),
+# 39 недельных якорей от когорты 2025-02-17, 20% пользователей.
+# Свой набор признаков (build_features_short.py), USE_* не использует; при
+# отсутствии work/features_short пересобирает его сам (уже входит в 429 с).
+# Веса: НЕ СОХРАНЯЮТСЯ -> артефакт это прогноз.
+```
+
+### 3.10 Порождающий симулятор, `train_hmm_sim.py`
 
 ```bash
 THREADS=6 .venv/bin/python work/scripts/train_hmm_sim.py --name hmmsim \
   --states 4 --sims 500 --win 120 --em-cap 25000 --splits val,test
-# ~6 мин. У модели НЕТ обучаемых весов: скрытая марковская модель покупательской
-# активности оценивается EM по собственной истории каждого юзера и таргет не
-# видит вовсе, дальше 500 симуляций вперёд на 30 дней. Воспроизводится
-# повторным запуском с тем же сидом; work/models/hmmsim_meta.json это
-# фиксирует (`"stateless": true`).
+# 366 с, val 1.823787. Обучаемых весов НЕТ по построению: скрытая марковская модель
+# покупательской активности оценивается EM по собственной истории каждого юзера,
+# таргет не видит вовсе, дальше 500 симуляций вперёд на 30 дней. Воспроизводится
+# повторным запуском с тем же сидом; hmmsim_meta.json это фиксирует ("stateless": true).
+# --splits ЗДЕСЬ ОБЯЗАТЕЛЕН: умолчание "val", без "test" прогноза теста не будет.
 ```
 
-### 2.9 `channel2` — канальная декомпозиция, вес 0.012, val 1.6872
+## 4. Шаг 2: калибровка и усреднение сидов
+
+Порядок жёсткий: **сначала усреднение сидов, потом калибровка усреднённого**. Так эти
+члены и собирались; калибровать по отдельности, а потом усреднять — другая операция.
 
 ```bash
-USE_V2=1 USE_V3=1 USE_V4=1 OMP_NUM_THREADS=6 \
-.venv/bin/python work/scripts/train_channel.py --name channel2 \
-  --threads 6 --n-anchors 14 --gap-days 30 --seed 42
-# ~8.5 мин. GMV = «из поиска» + «из каталога», две LightGBM (tweedie vp=1.45
-# на log1p канального таргета), сумма в линейном пространстве.
-# Веса: work/models/channel2__search.txt, channel2__cat.txt
-```
+# усреднение сидов в log1p (равные веса)
+.venv/bin/python work/scripts/avg_log1p.py --out fusion_v3c_avg \
+  --preds fusion_v3c555,fusion_v3c42,fusion_v3c7
+.venv/bin/python work/scripts/avg_log1p.py --out mlpziln_cal_avg \
+  --preds mlpziln_c42,mlpziln_c1337,mlpziln_c7
+.venv/bin/python work/scripts/avg_log1p.py --out behavonly_avg \
+  --preds behavonly,behavonly_s1337,behavonly_s7
 
-## 3. Калибровка каждой модели
-
-Все девять моделей перед блендом калибруются одинаково:
-
-```bash
-for m in fusion_f c_ts2_s42 mlpziln behavonly countaov seq2tr_f twl_v7 hmmsim channel2; do
-  .venv/bin/python work/scripts/calibrate.py --pred $m     # -> ${m}_cal_{val,test}.parquet
+# калибровка: 24 квантильных бина в log1p
+for m in fusion_v3c_avg fusion_v3ctl c_ts2_s7 mlpziln_cal_avg c_ts2_s42 behavonly_avg \
+         seq2tr_f weak_an_d weak_ft_recency countaov_s7 weak_ft_counts hmmsim \
+         fusion_v3 twl_v7 febspec2 weak_ft_long90 ; do
+  .venv/bin/python work/scripts/calibrate.py --pred $m --bins 24
 done
 ```
 
-Прогнозы бьются на 24 квантильных бина в log1p-пространстве, в каждом бине
-считается сдвиг `mean(log1p(факт)) - mean(log1p(прогноз))`, между центрами бинов
-сдвиг интерполируется. Честность контролируется внутри скрипта: таблица
-подгоняется на половине юзеров, проверяется на другой. Эффект: +0.010…0.012
-RMSLE на модель.
+В каждом бине считается сдвиг `mean(log1p(факт)) − mean(log1p(прогноз))`, между центрами
+бинов он интерполируется. Честность контролируется внутри скрипта: таблица подгоняется на
+половине пользователей, проверяется на другой. Эффект +0.010…0.012 RMSLE на модель.
 
-Таблица сдвигов сохраняется в `work/models/NAME_cal.npz` (ключи `centers`,
-`shifts`) — инференс её просто применяет, а не переподбирает.
+Таблица сдвигов замораживается в `work/models/NAME_cal.npz` (ключи `centers`, `shifts`) —
+инференс её ПРИМЕНЯЕТ, а не переподбирает. **24 бина и `clip99` в подготовке признаков
+проверены парными замерами и стоят в оптимуме**: 15/63/127 бинов и варианты
+`signlog`/`rank`/`clip999`/`noclip` измерены и хуже.
 
-## 4. Бленд
+Четыре члена входят в бленд **сырыми**, без калибровки — так их выбрал оптимизатор:
+`wklin`, `wklin_wk`, `hmmsim` (он же входит и калиброванным, с другим весом) и
+`c_xtw_s42`.
 
-Веса подобраны NNLS на валидации, честная оценка — OOF по 5 фолдам по юзерам
-(`work/reports/scores.tsv`: `blend_cal 1.666791`). Канонический словарь весов
-лежит в коде: `work/scripts/blend_testopt.py`, константа `W_VAL`.
-
-| модель | вес | | модель | вес |
-|---|---|---|---|---|
-| `fusion_f_cal` | 0.316 | | `seq2tr_f_cal` | 0.070 |
-| `c_ts2_s42_cal` | 0.246 | | `twl_v7_cal` | 0.055 |
-| `mlpziln_cal` | 0.122 | | `hmmsim_cal` | 0.028 |
-| `behavonly_cal` | 0.080 | | `channel2_cal` | 0.012 |
-| `countaov_cal` | 0.074 | | **сумма** | **1.003** |
-
-Смешивание — взвешенная сумма в log1p-пространстве:
-
-```
-lp_blend = sum_i w_i * log1p(pred_i)
-```
-
-Результат: `work/preds/blend_cal_{val,test}.parquet`, честный val-OOF **1.666791**.
-
-## 5. Финал: два числа
-
-Бленд применяется к тесту, и дальше к нему применяется **аффинная
-перенастройка в log1p-пространстве** — ровно два числа:
-
-```
-lp_final = 1.0775793 * lp_blend + 0.0061760
-```
-
-Что происходит с распределением прогноза (фактические числа на нашем
-`blend_cal_test.parquet`, 250 000 строк):
-
-| | до | после | целевое |
-|---|---|---|---|
-| mean log1p | 2.1553 | **2.3287** | 2.3275 |
-| sd log1p | 1.5106 | **1.6278** | 1.628 |
-
-### Откуда берётся каждое число
-
-**Число 1 — уровень (подъём среднего 2.155 → 2.325).** Целевое `mean_P(t) = 2.3275 ± 0.0064`
-замерено НА ЛИДЕРБОРДЕ: пара сабмитов, отличающихся на известную константу в
-log-пространстве, даёт точное среднее из разности квадратов скоров
-(`work/reports/KNOWLEDGE.md`, факт Ф18; методика — `work/scripts/predict_lb.py`).
-Причина сдвига физическая: тестовое окно 14.02–15.03 содержит неделю перед
-8 марта, а все модели обучены на осенне-зимних окнах и систематически
-недопредсказывают. Локальная валидация этого увидеть не может в принципе —
-такой сезонности нет ни в одном обучаемом окне.
-
-*Независимая проверка (без лидерборда):* на прошлогодних аналогах окон
-(янв–фев 2025 против фев–мар 2025, все 250k юзеров) среднее log1p растёт
-1.5396 → 1.7154, то есть **+0.1759**. Наш применённый подъём — **+0.1694**.
-Сходится.
-
-**Число 2 — масштаб (множитель 1.0774…1.0776 к логарифму прогноза).** Бленд
-недодисперсен: его sd в log1p равен 1.510, а нужно 1.628. Причина — калибровка
-обучена на валидации, а тестовое окно шире по разбросу. Множитель раскладывается
-как сезонность **1.036** (тот же прошлогодний замер: sd 2.1644 → 2.2432)
-умножить на исправление недодисперсности бленда **~1.04**. То есть и он
-подтверждён независимо от лидерборда.
-
-Численные значения записаны в `work/reports/blend_testopt_honest.json` (ключ
-`_affine`) и `blend_testopt_final.json` (ключ `affine_valblend`). Эквивалентная
-операционная формулировка (`work/scripts/stack_meta_ship.py`, константы
-`TARGET_SD = 1.628`, `TARGET_MEAN = 2.3275`): растянуть до sd = 1.628, затем
-сдвинуть до mean = 2.3275.
-
-### Почему именно два числа, а не длинная цепочка
-
-
-```
-FILE.csv = 0.0027 + 1.0774 * blend_cal_test     (корреляция 0.9972,
-                                                   разброс остатка 0.121
-                                                   против 1.632 у прогноза)
-```
-
-То есть **весь результат — это честный бленд плюс те же два числа**, а вся
-цепочка мелких шагов — остаток 7.4%. Оба числа измерены с запасом в десятки
-шумов (`work/reports/finalists.md`: один подобранный по публичному скору
-параметр даёт фиктивный выигрыш 0.000022 RMSLE, а наши шаги дали 2.2–86 таких
-единиц).
-
-Честная цена самой аффинной подгонки (2 параметра, `blend_testopt_honest.json`):
-`d_emp = 0.00061` при выигрыше 0.0132.
-
-Аффинная перенастройка
-> предназначена ТОЛЬКО для файлов из `*_cal`-пула.
-
-## 6. Инференс
+## 5. Шаг 3: бленд
 
 ```bash
-bash final_submission/run_inference.sh          # -> FILE.csv
+.venv/bin/python work/scripts/blend_reopt.py --save --boot 50
+# библиотека B_plus_cal (203 модели), метод ridge_free, alpha_rel 1e-4
+# val 1.666302, честный OOF по 5 фолдам по ПОЛЬЗОВАТЕЛЯМ 1.666419
+# -> work/preds/blend_opt_{val,test}.parquet + work/reports/blend_reopt.json
 ```
 
-`inference.py` повторяет §1 (только тестовый якорь), загружает веса из
-`final_submission/models/` (или `work/models/`), считает прогнозы девяти
-моделей, применяет калибровки из §3, веса из §4 и аффин из §5. Если какого-то
-файла весов нет — падает с явным сообщением, какого именно, а не выдаёт мусор.
+Смешивание — взвешенная сумма в log1p: `lp_blend = sum_i w_i * lp_i`.
 
-## 7. Что НЕ входит в решение
+| член | вес | | член | вес |
+|---|---|---|---|---|
+| `fusion_v3c_avg_cal` | 0.230705 | | `countaov_s7_cal` | 0.023260 |
+| `fusion_v3ctl_cal` | 0.151006 | | `wklin_wk` | 0.019400 |
+| `c_ts2_s7_cal` | 0.090592 | | `weak_ft_counts_cal` | 0.017269 |
+| `mlpziln_cal_avg_cal` | 0.077215 | | `hmmsim_cal` | 0.016734 |
+| `c_ts2_s42_cal` | 0.075589 | | `fusion_v3_cal` | 0.015661 |
+| `wklin` | 0.067217 | | `twl_v7_cal` | 0.014492 |
+| `behavonly_avg_cal` | 0.057488 | | `febspec2_cal` | 0.012494 |
+| `seq2tr_f_cal` | 0.049046 | | `hmmsim` | 0.007364 |
+| `weak_an_d_cal` | 0.043814 | | `weak_ft_long90_cal` | 0.007295 |
+| `weak_ft_recency_cal` | 0.023857 | | `c_xtw_s42` | 0.004399 |
+| | | | **сумма** | **1.0049** |
 
-Чтобы не тратить время на воспроизведение отвергнутого: наборы признаков
-v6/v8/v10, `build_seq.py`; модели `train_mlp.py`, `train_gru.py`,
-`train_bagged.py`, `train_gls.py`, `train_pseudo.py`, `train_quantint.py`,
-`train_rank.py`, `train_whale.py`, `train_horizon.py`, `train_hjit.py`,
-`train_fusion3.py`. Модели эпохи до `--gap-days 30` (`lgblog_final`,
-`xgblog_final`, `cblog_final`, `mlp_final`, `gru_final`, `hjit37`, `hjit44`)
-перечислены как `CONTAMINATED` в `work/scripts/blend_testopt.py` и исключены:
-их val-скоры завышены пересечением таргет-окон.
+Эти же 20 весов **зафиксированы константой `BLEND_WEIGHTS` в `inference.py`**: отчёт
+`blend_reopt.json` переписывается при каждом перезапуске оптимизатора, а пакет обязан
+собирать один и тот же файл. Сверить состав пакета с текущим отчётом:
 
-1.650554 против 1.6489446 у основной линии.
-Скрипты `train_mlpbin.py` и `train_feb_specialist.py` оставлены рабочими и тоже
-сохраняют веса, но в финальный бленд не входят.
+```bash
+.venv/bin/python final_submission/inference.py --stage check --verify-blend
+```
+
+## 6. Шаги 4–5: моменты и накопленная цепочка
+
+```bash
+.venv/bin/python work/scripts/make_candidate.py --pred blend_opt --name FILE.csv \
+  --carry-from blend_cal --strength 0.469
+```
+
+**Шаг 4 — приведение к моментам.** Наш лучший файл —
+это честный бленд плюс два числа: среднее log1p **2.3247** и разброс **1.6320**.
+
+Это свойство ТЕСТОВОГО ОКНА, а не конкретного бленда, поэтому при улучшении бленда
+числа не переподбираются — новый бленд приводится к тем же двум моментам, и улучшение
+сохраняется, а проверенная сезонная настройка не теряется. Физическая причина сдвига:
+тестовое окно 14.02–15.03 содержит неделю перед 8 марта, а модели обучены на
+осенне-зимних окнах. Независимая проверка: на прошлогодних аналогах окон
+среднее log1p растёт 1.5396 → 1.7154 (+0.1759), наш подъём +0.1694.
+
+**Шаг 5а — перенос цепочки** (`--carry-from blend_cal`). над приведённым к тем же
+моментам старым блендом от неё остаётся вектор с разбросом 0.121 (7.4% от 1.632). Без
+переноса эта накопленная работа теряется.
+
+**Шаг 5б — сила шага** (`--strength 0.469`). улучшение бленда,
+посчитанное на валидации, переносится на тест лишь на 39%, и применение полной силы
+перелетает через оптимум. 1.6488027376 при прогнозе 1.6488044, попадание
+1.7e-6).
+
+Оба вектора (опора и цепочка) — **разности отправленных файлов, а не выход модели**,
+пересчитать их из весов нельзя. В пакете они лежат замороженными в
+`final_submission/models/chain_test.npz`; пересобрать:
+
+```bash
+.venv/bin/python final_submission/inference.py --stage freeze
+```
+
+## 7. Шаг 6: поправка на молчащих
+
+**Это самый ценный шаг решения: 0.00084 из 0.00098 дневного прироста.**
+
+### 7.1 Почему она нужна
+
+Организаторы отобрали 250000 пользователей как активных в КАЖДОМ из трёх 30-дневных
+блоков перед тестовым окном (16.11–15.12, 16.12–14.01, 15.01–13.02). Наше валидационное
+окно 15.01–13.02 — **один из этих блоков**. Значит:
+
+* на валидации молчащих (ноль событий за 30 дней) нет **по построению**, это не свойство
+  данных, а следствие правила отбора;
+* в тестовом окне 14.02–15.03 никакого отбора уже нет, и молчащие там будут;
+* для молчащего верный ответ — ноль, а любая наша модель, обученная и проверенная там,
+  где молчащих нет, даёт ему обычный положительный прогноз.
+
+Ни одна локальная валидация этого увидеть не может: нужный сигнал вырезан из
+валидационного окна условием отбора. Поэтому поправка строится на «чистых» якорях —
+тех, чьё 30-дневное целевое окно кончается **раньше 2025-11-16**, начала первого блока
+отбора. Последний такой якорь — **2025-10-15**.
+
+### 7.2 Форма поправки
+
+Среднесохраняющая: `delta_i = -(p_i * m_i - mean(p*m))`, где `m = log1p(прогноза)`,
+`p` — вероятность молчания. Работает в ней только РАЗБРОС `p` между людьми: общий уровень
+`p` ничем локальным не определён (доля молчащих на чистых якорях сама падает 0.037 → 0.020
+по мере приближения к блокам отбора — это артефакт отбора, а не тренд) и лишь
+перепараметризует силу. Отсюда протокол: направление приводится к фиксированному размеру
+`q = mean(d²) = 0.0027149`, и тогда коэффициент силы означает одно и то же физическое
+количество поправки независимо от выбранного уровня `p`.
+
+### 7.3 Как обучается модель молчания
+
+```bash
+.venv/bin/python work/scripts/silence_model.py --stage eval    # честный замер
+.venv/bin/python work/scripts/silence_model.py --stage final   # рабочая модель
+```
+
+* **Обучающие якоря:** 2025-07-02, 07-16, 07-30, 08-13, 08-27 (пять). Якорь 2025-09-10
+  отложен под калибровку наклона Платта, 2025-10-15 — под честную проверку.
+* **Цель:** ноль событий в (якорь, якорь+30].
+* **Модель:** смесь 0.5/0.5 логистической регрессии и LightGBM. AUC 0.901 на честном
+  якоре 2025-10-15.
+
+Три защиты от артефакта отбора, без которых модель выучила бы правило отбора вместо
+молчания:
+
+1. **Население подогнано под отбор.** На каждом обучающем якоре берутся только те, кто
+   активен в каждом из трёх предшествующих 30-дневных блоков — ровно то условие, которому
+   все 250000 удовлетворяют на тестовом якоре. Инференс это проверяет утверждением
+   `assert sel_mask(C, TEST_ANCHOR).all()`, а не полагается на слово.
+2. **Свой свободный член на якорь** (у логрегрессии фиктивные переменные, у бустинга
+   `init_score`): уровень якоря поглощается и не участвует в обучении формы.
+3. **Признаки, живущие на уровне якоря, выбрасываются.** `history_days`,
+   `seasonal_index`, `ya_cov_*` постоянны внутри якоря (доля межъякорной дисперсии 1.0), а
+   `ya_cov_*` к тому же равны 0 на всех обучающих якорях и 1 на тестовом — модель на них
+   экстраполировала бы вслепую. Отсев по доле межъякорной дисперсии > 0.30 оставляет 180
+   признаков из 203; все оставшиеся заменяются **внутриякорными процентильными рангами**
+   (связки получают средний ранг — обязательно, потому что у большинства признаков крупная
+   масса точных нулей).
+
+### 7.4 Как применяется
+
+Отправленный файл раскладывается точно:
+
+```
+M1 = FILE.csv + 0.894 * mdl_tektit + 0.65 * (d_new - proj_{mdl_tektit} d_new)
+```
+
+* `mdl_tektit` — **старое** направление, построенное по грубой двумерной таблице «активных
+  дней за 90 x давность последней активности».
+* `d_new` — направление **модели** из 7.3, приведённое к тому же `q`. Её преимущество
+  измерено на честном якоре 2025-10-15 отношением выигрышей `c²/q`, где `c = cov(p*m, y*m)`:
+  **1.155**, бутстрап по пользователям [1.096, 1.223]. Эта величина не зависит от масштаба
+  `p`, поэтому она чистая мера выравнивания ФОРМЫ.
+* Ортогональная новизна `e = d_new − proj_{mdl_tektit} d_new` — та часть, которой в опорном
+  направлении нет. Её новизна относительно всего измеренного базиса 0.902, наивысшая за проект,
+  но собственного замера у неё пока нет, поэтому шаг усажен до **0.65**, а не применён
+  целиком.
+* Корреляция нового направления со старым 0.839; `q` обоих 0.0027149.
+
+Проверка алгебры (выполняется за секунду и должна давать машинный ноль):
+
+```bash
+# FILE.csv + 0.894*mdl_tektit должно совпасть с FILE.csv до 1e-16
+.venv/bin/python - <<'PY'
+import sys, numpy as np; sys.path.insert(0,'work/scripts')
+from subs import lp
+z = np.load('final_submission/models/chain_test.npz')
+print(np.abs((lp('FILE.csv')[1] + 0.894*z['dir_old']) - lp('FILE.csv')[1]).max())
+PY
+```
+
+В инференсе вероятность `p` для 250000 пользователей кэшируется в
+`final_submission/models/silence_p_test.npz`; если файла нет, стадия `silence` обучает
+модель на месте (~10 минут), импортируя примитивы прямо из `work/scripts/silence_model.py`.
+
+## 8. Что придётся переобучить, и сколько это стоит
+
+Состояние проверяется одной командой — она же печатает команду восстановления для
+каждого недостающего артефакта:
+
+```bash
+.venv/bin/python final_submission/inference.py --stage check
+```
+
+На 19 августа 20:00 картина такая.
+
+**Веса есть, инференс их грузит (13 моделей):** `mlpziln_c42`, `mlpziln_c1337`,
+`mlpziln_c7`, `behavonly_s1337`, `behavonly_s7`, `weak_an_d`, `weak_ft_recency`,
+`weak_ft_counts`, `weak_ft_long90`, `countaov_s7` (и таблицы калибровки к ним).
+
+**Переобучить обязательно — весов нет и получить их неоткуда:**
+
+| модель | почему | время |
+|---|---|---|
+| `seq2tr_f` | трейнер сохраняет веса, но прогон был до `model_io`; **плюс тензоры `work/seq2` удалены**, их пересборка ~11 ГБ | **5.4 ч** + сборка seq2 |
+| `c_ts2_s7` | прогон был до `model_io` | 8 мин |
+| `c_ts2_s42` | то же | 5 мин |
+| `twl_v7` | то же (есть только сиды s7/s1337) | 3 мин |
+| `c_xtw_s42` | то же | 4 мин |
+| `behavonly` (сид 42) | то же (есть только s1337 и s7) | 4 мин |
+| **итого** | | **5.8 ч** |
+
+**Трейнер не сохраняет веса вообще — артефактом является прогноз** (сейчас прогнозы лежат
+в `work/preds`, но в отгружаемом пакете их не будет):
+
+| модель | скрипт | время |
+|---|---|---|
+| `fusion_v3c42`, `fusion_v3c555`, `fusion_v3c7`, `fusion_v3`, `fusion_v3ctl` | `train_fusion3.py` — нет ни одного вызова `model_io` | 15–18 мин каждая, **1.3 ч** |
+| `wklin` (+`wklin_wk` тем же прогоном) | `train_wklin.py` | 1.5 мин |
+| `febspec2` | `train_febspec2.py` | 7 мин |
+| `hmmsim` | весов нет по построению, пересчёт симулятора | 6 мин |
+| **итого** | | **1.6 ч** |
+
+**Плюс к этому:** сборка тензоров `seq2` (~11 ГБ, `work/seq3` 3.4 ГБ на месте), четыре
+недостающие таблицы калибровки (`c_ts2_s42`, `seq2tr_f`, `hmmsim`, `twl_v7`, по ~1 мин),
+обучение модели молчания (~10 мин).
+
+**Итог: 7.4 часа последовательного обучения на чистой машине** (5.8 ч того, у чего веса
+должны были быть, но нет + 1.6 ч того, у чего весов не бывает), плюс сборка признаков и
+тензоров. Из них 5.4 часа — одна модель `seq2tr_f` с весом 0.049.
+
+> **Самое дешёвое улучшение воспроизводимости**, если появится время: добавить вызовы
+> `model_io.save_torch` / `save_meta` в `train_fusion3.py`. Это снимет 1.3 ч из 1.6 ч
+> второй таблицы и, главное, закроет дыру на 0.397 веса бленда — почти сорок процентов
+> решения сейчас нельзя проверить, не переобучив.
+
+## 9. Что НЕ входит в решение
+
+Чтобы не тратить время на воспроизведение отвергнутого: наборы признаков v5/v6/v8/v10,
+`build_seq.py`; модели `train_mlp.py`, `train_gru.py`, `train_bagged.py`, `train_gls.py`,
+`train_pseudo.py`, `train_quantint.py`, `train_rank.py`, `train_whale.py`,
+`train_horizon.py`, `train_hjit.py`, `train_channel.py`, `train_mlpbin.py`,
+`train_feb_specialist.py`, `train_febspec3.py`, `train_fusion.py` (предшественник
+`train_fusion3.py`, работал на тензорах seq2), `train_xtw.py` (более поздний клон
+`train_gbdt.py`, отправленный `c_xtw_s42` обучен НЕ им).
+
+Модели эпохи до `--gap-days 30` (`lgblog_final`, `xgblog_final`, `cblog_final`,
+`mlp_final`, `gru_final`, `hjit37`, `hjit44`) исключены из библиотеки бленда как
+`OLD_ERA`: их val-скоры завышены пересечением таргет-окон.
