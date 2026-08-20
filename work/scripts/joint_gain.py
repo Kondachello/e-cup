@@ -78,7 +78,10 @@ def main():
         raw = np.log1p(np.clip(df["pred"].to_numpy().astype(np.float64), 0, None))
         cand[n] = calibrate_honest(raw, ly, 24, args.seed)
 
-    rng = np.random.default_rng(args.seed)
+    # Сид со смещением: при том же args.seed перестановка здесь совпадала бы с DEV/EVAL
+    # library_sweep — замер набора, отобранного свипом, наполовину шёл бы по строкам,
+    # которые отбор уже видел.
+    rng = np.random.default_rng(args.seed + 271)
     half = rng.permutation(len(ly)) < len(ly) // 2
 
     def gain(names):

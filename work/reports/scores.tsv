@@ -422,3 +422,6 @@ fp_bin_noclip_42	1.728878	парный замер подготовки приз�
 fp_bin_noclip_1337	1.724003	парный замер подготовки признаков: единственное отличие от es_bin_cal1337 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip; holdout raw=1.725601 cal=1.719086
 fp_ziln_noclip_42	1.767192	парный замер подготовки признаков: единственное отличие от es_ziln_cal42 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip
 fp_ziln_noclip_1337	1.871788	парный замер подготовки признаков: единственное отличие от es_ziln_cal1337 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip
+kostya46_cal	1.669876	binned log-shift calibration of kostya46; holdout 1.702727->1.670440
+gseq_small_s42_cal	1.698032	binned log-shift calibration of gseq_small_s42; holdout 1.713952->1.697871
+gseq_big_s42_cal	1.677101	binned log-shift calibration of gseq_big_s42; holdout 1.716496->1.677692

@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -29,12 +30,22 @@ import numpy as np
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import PREDS_DIR, ROOT
+from common import PREDS_DIR, REPORTS_DIR, ROOT
 from margin import calibrate_honest, score
 
 # A single model cannot beat a 30-model blend; anything that does is contaminated
 
 SANITY_FLOOR = 1.66
+# Узкая утечка проходит оба скоровых порога: соло-скор нормальный, а остаток знает
+# валидацию (direct_val2chk: cal 1.6649 «лучше бленда», парный вклад +0.016 — в 35 раз
+# выше рекорда tfm3 0.000443). Потолок правдоподобия парного вклада одиночки:
+CONTAM_CEIL = 0.002
+
+# Обучены до введения зазора 30 дней (val завышен на 0.05-0.10) либо мета-стек,
+# подогнанный на валидации. Порог SANITY_FLOOR их не ловит: скоры выглядят законно.
+BLACKLIST = {"gru_final", "lgblog_final", "xgblog_final", "mlp_final", "stack_meta"}
+# Производные самого бленда: добавлять бленд к бленду — вырожденный кандидат.
+BLEND_PREFIXES = ("blend", "caruana")
 
 
 def nnls_weights(A: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -65,32 +76,68 @@ def main():
     ap.add_argument("--max-k", type=int, default=10)
     ap.add_argument("--random-sets", type=int, default=300)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--json", default="library_sweep.json",
+                    help="имя json-артефакта в work/reports (прошлый прогон не оставил ничего)")
     args = ap.parse_args()
 
     pack = pl.read_parquet(args.pack / "val_preds.parquet").sort("user_id")
     uid = pack["user_id"].to_numpy()
     ly = np.log1p(np.clip(pack["target"].to_numpy().astype(np.float64), 0, None))
     lb = pack["blend"].to_numpy().astype(np.float64)
-    print(f"эталон: бленд, скор {score(lb, ly):.6f}, n={len(ly)}")
+    sb_full = score(lb, ly)
+    print(f"эталон: бленд, скор {sb_full:.6f}, n={len(ly)}")
+
+    # отдельная перестановка для проверки правдоподобия парного вклада кандидата
+    chk = np.random.default_rng(args.seed + 999).permutation(len(ly)) < len(ly) // 2
+
+    def pair_gain(lp: np.ndarray) -> float:
+        A = np.column_stack([lb, lp])
+        gs = []
+        for m in (chk, ~chk):
+            w = nnls_weights(A[m], ly[m])
+            gs.append(score(lb[~m], ly[~m]) - score(A[~m] @ w, ly[~m]))
+        return float(np.mean(gs))
 
     names, cols = [], []
+    excluded: dict[str, str] = {}
     for f in sorted(PREDS_DIR.glob("*_val.parquet")):
         n = f.name[: -len("_val.parquet")]
-        if n == "blend":
+        if n in BLACKLIST or n.startswith(BLEND_PREFIXES):
+            excluded[n] = "чёрный список (pre-gap / стек / производная бленда)"
+            continue
+        if n.endswith("_cal") and (PREDS_DIR / f"{n[:-4]}_val.parquet").exists():
+            # свип калибрует сам; _cal при живом базовом файле — коллинеарный дубль
+            excluded[n] = "производная _cal при живом базовом файле"
             continue
         d = pl.read_parquet(f).sort("user_id")
+        if "pred" not in d.columns:
+            excluded[n] = "нет колонки pred (служебный файл)"
+            continue
         if d.height != len(uid) or not np.array_equal(d["user_id"].to_numpy(), uid):
             print(f"  пропуск {n}: чужой юниверс")
+            excluded[n] = "чужой юниверс"
             continue
         lp = calibrate_honest(
             np.log1p(np.clip(d["pred"].to_numpy().astype(np.float64), 0, None)), ly, 24, args.seed)
         s = score(lp, ly)
         if s < SANITY_FLOOR:
             print(f"  ПРОПУСК {n}: скор {s:.4f} < {SANITY_FLOOR} — признак контаминации")
+            excluded[n] = f"скор {s:.4f} ниже пола {SANITY_FLOOR}"
+            continue
+        if s < sb_full + 0.001:
+            print(f"  ПРОПУСК {n}: калиброванный скор {s:.4f} на уровне бленда {sb_full:.4f} "
+                  f"— честной одиночке недоступно")
+            excluded[n] = f"калиброванный скор {s:.4f} на уровне бленда — контаминация"
+            continue
+        g1 = pair_gain(lp)
+        if g1 > CONTAM_CEIL:
+            print(f"  ПРОПУСК {n}: парный вклад {g1:+.6f} выше потолка {CONTAM_CEIL} "
+                  f"— знает валидацию")
+            excluded[n] = f"парный вклад {g1:+.6f} выше потолка правдоподобия"
             continue
         names.append(n); cols.append(lp)
     X = np.column_stack(cols)
-    print(f"кандидатов в библиотеке: {len(names)}\n")
+    print(f"кандидатов в библиотеке: {len(names)} (исключено {len(excluded)})\n")
 
     rng = np.random.default_rng(args.seed)
     dev = rng.permutation(len(ly)) < len(ly) // 2      # отбор и веса живут здесь
@@ -135,6 +182,21 @@ def main():
     print(f"{'k':>3}{'жадный (eval)':>16}{'пол (95%)':>14}  бьёт пол?")
     for k, nm, gd, ge in curve:
         print(f"{k:>3}{ge:>16.6f}{floors[k][1]:>14.6f}  {'ДА' if ge > floors[k][1] else 'нет'}")
+
+    out = {
+        "seed": args.seed,
+        "reference_blend": round(score(lb, ly), 6),
+        "n_candidates": len(names),
+        "candidates": names,
+        "excluded": excluded,
+        "curve": [{"k": k, "added": nm, "dev": round(gd, 6), "eval": round(ge, 6),
+                   "floor_mean": round(floors[k][0], 6), "floor_p95": round(floors[k][1], 6),
+                   "beats_floor": bool(ge > floors[k][1])}
+                  for k, nm, gd, ge in curve],
+        "greedy_set": [names[i] for i in chosen],
+    }
+    (REPORTS_DIR / args.json).write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(f"\nJSON: work/reports/{args.json}")
 
 
 if __name__ == "__main__":

@@ -5,10 +5,16 @@ blend's linear hull the correlation is identically sb/sm, i.e. it is determined 
 model's own score and says nothing (verified to five decimals on 101 models).
 
     ЗАПАС = sb / sm - rho          (sb = blend score, sm = model score, rho = err corr)
-    вклад ≈ 7.1 · ЗАПАС²
+    вклад = sb²·sm²·з² / [(sm² − sb² + 2·sb·sm·з) · 2·sb]     (точная алгебра пары)
 
-Reference points: record margin over the whole project 0.00193; a margin of 0.0065 is
-needed for a +0.0003 gain; leaderboard measurement noise is 0.000022.
+The old shorthand `вклад ≈ 7.1·ЗАПАС²` is dead: it explained 9% of the variance and
+under-priced strong models 3-20x (KNOWLEDGE «ПОПРАВКА К ЗАКОНУ ВКЛАДА»). With the exact
+pair algebra the contribution of a strong model (sm/sb -> 1) is almost LINEAR in margin,
+so the margin needed for +0.0003 depends on the score: 1.67 -> 0.00166, 1.70 -> 0.00412,
+1.83 -> 0.00811. Sets are still measured by joint_gain.py - margins do not add up.
+
+Reference points: record margin over the whole project 0.00193; leaderboard measurement
+noise is 0.000022.
 
 Everything is measured on CALIBRATED predictions, because the raw score misled the team
 eight times. Calibration is the honest cross-fit from the pack README: one half of the
@@ -55,7 +61,10 @@ def fit_shifts(lp: np.ndarray, ly: np.ndarray, bins: int):
 
 
 def calibrate_honest(lp: np.ndarray, ly: np.ndarray, bins: int = 24, seed: int = 0) -> np.ndarray:
-    rng = np.random.default_rng(seed)
+    # Сид со смещением: перестановка калибровки не должна совпадать с fit/score-сплитами
+    # замерителей (joint_gain, library_sweep) — при одинаковом default_rng(seed) сплит
+    # калибровки и сплит отбора были одной перестановкой, узкая утечка EVAL в отбор.
+    rng = np.random.default_rng(seed + 100_003)
     half = rng.permutation(len(ly)) < len(ly) // 2
     out = np.empty_like(lp)
     for m in (half, ~half):
@@ -85,8 +94,8 @@ def main():
     eb = lb - ly
     sb = score(lb, ly)
     print(f"эталон: бленд из пакета, скор {sb:.6f}, n={len(ly)}")
-    print(f"ориентиры: рекорд запаса {RECORD}, нужно {0.0065} ради прироста {THRESHOLD}, "
-          f"шум {NOISE}\n")
+    print(f"ориентиры: рекорд запаса {RECORD}, шум {NOISE}; вклад — точная алгебра пары, "
+          f"наборы мерить joint_gain\n")
 
     hdr = f"{'модель':<24}{'скор':>10}{'корр':>9}{'ЗАПАС':>10}{'вклад':>10}  вердикт"
     print(hdr)
@@ -112,9 +121,11 @@ def main():
             rho = float(np.mean(e * eb) / (sm * sb))
             margin = sb / sm - rho
             # the identity is margin = (sb/sm)(1 - beta): margin <= 0 means beta >= 1, i.e. the
-            # optimiser gives this model zero weight. Squaring a negative margin would turn a
-            # useless model into a large "contribution", so the floor is not cosmetic.
-            contrib = 7.1 * max(margin, 0.0) ** 2
+            # optimiser gives this model zero weight. A negative margin would flip the sign of
+            # the exact formula's numerator, so the floor is not cosmetic.
+            z = max(margin, 0.0)
+            den = (sm * sm - sb * sb + 2.0 * sb * sm * z) * 2.0 * sb
+            contrib = (sb * sb * sm * sm * z * z) / den if den > 1e-12 else 0.0
             verdict = ("ГОДИТСЯ" if contrib >= THRESHOLD else
                        "слабо, но не шум" if contrib >= 2 * NOISE else "шум")
             label = f"{name} {tag}".strip()

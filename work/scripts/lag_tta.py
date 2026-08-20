@@ -82,6 +82,12 @@ def main():
     # anchor's own target. So training stops before the deepest vintage we intend to score.
     gap_cut = min([VAL_ANCHOR - timedelta(days=30)] + [a - timedelta(days=1) for a in stale.values()])
     tr_anchors = [a for a in available_train_anchors() if a <= gap_cut]
+    # февральские якоря собраны без extra-тира (они нужны только год-назад окну febspec):
+    # чемпионский набор признаков на них не собирается, load_matrix падает на select
+    if os.environ.get("USE_V2"):
+        from common import FEATURES_DIR
+        tr_anchors = [a for a in tr_anchors
+                      if (FEATURES_DIR / f"anchor={a.isoformat()}.extra.parquet").exists()]
     print(f"deepest vintage {min(stale.values()) if stale else VAL_ANCHOR} "
           f"-> train cutoff {gap_cut}", flush=True)
     print(f"train anchors (gap30): {[a.isoformat() for a in tr_anchors]}", flush=True)
