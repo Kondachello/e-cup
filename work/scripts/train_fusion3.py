@@ -482,7 +482,7 @@ def ckpt_sweep(buf, model, val, device, args, es_ly, es_y, es_half, seed) -> lis
 
 def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epochs,
               val=None, eval_every=0, patience=3, label="p1", cal_secs=None,
-              ckpt_buf=None, ckpt_states=False, ckpt_cap=0):
+              ckpt_buf=None, ckpt_states=False, ckpt_cap=0, snap_every=0):
     """val = (val_x_mm, val_tab, val_y30_raw, idx) -> early stop on VAL RMSLE.
     Returns (model, best_state, best_rmsle, best_step, steps_done).
 
@@ -591,10 +591,17 @@ def run_train(args, device, seed, d_tab, xs, tabs, ylogs, ybuys, max_steps, epoc
                           f"lr {sched.get_last_lr()[0]:.2e} {time.time() - t0:.0f}s", flush=True)
                 if val is not None and eval_every and step % eval_every == 0:
                     do_eval()
-                elif (val is None and ckpt_buf is not None and eval_every
-                        and step % eval_every == 0):
+                elif (val is None and ckpt_buf is not None
+                        and (snap_every or eval_every)
+                        and step % (snap_every or eval_every) == 0):
                     # фаза 2: валидации нет, критерия нет, копим только веса —
-                    # усреднять там можно лишь по режиму last
+                    # усреднять там можно лишь по режиму last.  Сетка snap_every
+                    # РАСТЯНУТА пропорционально длине прогона (см. main): при
+                    # общей сетке 246 последние k точек фазы 2 легли бы на 11%
+                    # прогона против 17% в фазе 1 и на множители скорости
+                    # обучения 0.033/0.004/0 против 0.074/0.019/0, то есть были
+                    # бы заметно ближе друг к другу и скоррелированнее, и
+                    # перенос замера с валидации на тест был бы недействителен.
                     _push_ckpt(ckpt_buf, ckpt_cap, step, float("nan"),
                                float("nan"), None, model)
                 if stop or step >= max_steps:
@@ -836,10 +843,19 @@ def main():
                 print(f"[p2 seed {seed}] шагов {steps_cap} вместо {max2} "
                       f"(best_step {bs} x {iter_mult:.4f})", flush=True)
             buf2: list | None = [] if k2 else None
+            # сетка снимков растянута в steps_cap/max_steps раз, чтобы последние
+            # k точек фазы 2 легли на ТУ ЖЕ долю косинусного расписания, на
+            # которой они измерены в фазе 1; иначе окно оказывается уже и
+            # выигрыш от усреднения меньше замеренного
+            snap2 = max(1, round(eval_every * steps_cap / max(1, max_steps)))
+            if k2:
+                print(f"[p2 seed {seed}] сетка снимков {snap2} "
+                      f"(= {eval_every} x {steps_cap}/{max_steps})", flush=True)
             model2, _, _, _, steps2 = run_train(
                 args, device, seed, d_tab, xs2, tabs2, ylogs2, ybuys2,
                 max_steps=steps_cap, epochs=args.epochs, val=None, label="p2",
-                ckpt_buf=buf2, ckpt_states=bool(k2), ckpt_cap=max(1, k2) + 1)
+                ckpt_buf=buf2, ckpt_states=bool(k2), ckpt_cap=max(1, k2) + 1,
+                snap_every=snap2)
             if buf2:
                 sel2 = buf2[-k2:]
                 print(f"[p2 seed {seed}] {'swa' if args.swa else 'ckpt-avg'} last "

@@ -12,14 +12,20 @@ Loss per row (batch mean):
 
 Prediction targets RMSLE directly:
   E[log1p(y)] = p * E[log1p(exp(Z))], Z ~ N(mu, sigma^2), computed with
-  20-point Gauss-Hermite quadrature:
+  --gh-nodes-point Gauss-Hermite quadrature (default 20, the historical value):
     E[f(Z)] = (1/sqrt(pi)) * sum_i w_i * f(mu + sqrt(2)*sigma*x_i),
   f(z) = log1p(exp(z)) = softplus(z) (stable). pred = expm1(clip(p*Equad, 0)).
+  The node count only sets the accuracy of that integral, and softplus is
+  analytic, so it converges fast: over the reachable head box (sigma_max across
+  every ziln run ever is 2.50, mu p1..p99 = 2.8..6.3) 20 nodes are already
+  within 7e-9 of the exact value -- see --gh-nodes.
 
 Preprocessing / anchors / gap-days / early stopping / seed averaging are
-identical to train_mlp2.py. Stats npz additionally stores per-seed val
-percentiles of (p, mu, sigma) as calibration info. Preds contract unchanged:
-single `pred` column in raw GMV scale.
+identical to train_mlp2.py, including --feat-prep (featprep.py; clip99 default
+reproduces the historical median-impute -> clip [p1,p99] -> standardize path
+bit-for-bit). Stats npz additionally stores per-seed val percentiles of
+(p, mu, sigma) as calibration info. Preds contract unchanged: single `pred`
+column in raw GMV scale.
 
 --smoke: single seed, batch <= 2048, hard cap of 200 optimizer steps, forces
 --no-test, does not write preds/scores/stats — just prints the val RMSLE.
@@ -50,44 +56,25 @@ from calibrate import apply_shifts, fit_shifts
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
+from featprep import MODES as PREP_MODES
+from featprep import apply_stats, fit_stats
 from model_io import save_meta, save_torch
 
 MODELS_DIR = WORK / "models"
-STATS_MAX_ROWS = 750_000   # row-subsample size for percentile/mean/std estimation
-BLOCK = 262_144            # rows per block for in-place transform
 SMOKE_MAX_STEPS = 200
 SMOKE_MAX_BATCH = 2048
 LOGY_MIN, LOGY_MAX = -20.0, 30.0   # clamp for log(y) NLL inputs
 SIGMA_MAX = 10.0
-GH_X, GH_W = np.polynomial.hermite.hermgauss(20)   # Gauss-Hermite nodes/weights
+GH_NODES_DEFAULT = 20              # historical Gauss-Hermite node count
+GH_X, GH_W = np.polynomial.hermite.hermgauss(GH_NODES_DEFAULT)
 CAL_PCTS = [1.0, 5.0, 25.0, 50.0, 75.0, 95.0, 99.0]
 
 
-def fit_stats(X: np.ndarray) -> dict:
-    """Estimate impute/clip/standardize stats from a row-subsample of train."""
-    step = max(1, int(np.ceil(X.shape[0] / STATS_MAX_ROWS)))
-    S = np.ascontiguousarray(X[::step])
-    q = np.nanpercentile(S, [1.0, 50.0, 99.0], axis=0)
-    med = np.where(np.isfinite(q[1]), q[1], 0.0).astype(np.float32)
-    lo = np.where(np.isfinite(q[0]), q[0], med).astype(np.float32)
-    hi = np.where(np.isfinite(q[2]), q[2], med).astype(np.float32)
-    np.copyto(S, np.broadcast_to(med, S.shape), where=np.isnan(S))
-    np.clip(S, lo, hi, out=S)
-    mean = S.mean(axis=0, dtype=np.float64).astype(np.float32)
-    std = S.std(axis=0, dtype=np.float64).astype(np.float32)
-    std[~np.isfinite(std) | (std < 1e-7)] = 1.0
-    del S
-    return dict(med=med, lo=lo, hi=hi, mean=mean, std=std)
-
-
-def apply_stats(X: np.ndarray, s: dict) -> None:
-    """Blockwise in-place: median-impute -> clip [p1,p99] -> standardize."""
-    for i in range(0, X.shape[0], BLOCK):
-        B = X[i:i + BLOCK]
-        np.copyto(B, np.broadcast_to(s["med"], B.shape), where=np.isnan(B))
-        np.clip(B, s["lo"], s["hi"], out=B)
-        B -= s["mean"]
-        B /= s["std"]
+def gh_rule(n: int):
+    """Gauss-Hermite nodes/weights; n=20 returns the historical constants."""
+    if n == GH_NODES_DEFAULT:
+        return GH_X, GH_W
+    return np.polynomial.hermite.hermgauss(n)
 
 
 def anchor_heights(anchors) -> list[int]:
@@ -152,7 +139,7 @@ def build_model(d_in: int, hidden: list[int], dropout: float):
 
 
 def predict_log(model, X: np.ndarray, device: str, bs: int = 65536,
-                collect_heads: bool = False):
+                collect_heads: bool = False, gh_nodes: int = GH_NODES_DEFAULT):
     """E[log1p(y)] = sigmoid(logit) * GH-quadrature E[softplus(Z)], Z~N(mu,s^2).
 
     Returns per-row predictions in log1p space (always >= 0). With
@@ -160,15 +147,16 @@ def predict_log(model, X: np.ndarray, device: str, bs: int = 65536,
     import torch
     import torch.nn.functional as F
     model.eval()
-    gx = torch.as_tensor(GH_X, dtype=torch.float32, device=device)
-    gw = torch.as_tensor(GH_W, dtype=torch.float32, device=device)
+    gx_np, gw_np = gh_rule(gh_nodes)
+    gx = torch.as_tensor(gx_np, dtype=torch.float32, device=device)
+    gw = torch.as_tensor(gw_np, dtype=torch.float32, device=device)
     sqrt2, inv_sqrt_pi = math.sqrt(2.0), 1.0 / math.sqrt(math.pi)
     outs, ps, mus, sgs = [], [], [], []
     with torch.no_grad():
         for i in range(0, X.shape[0], bs):
             xb = torch.from_numpy(np.ascontiguousarray(X[i:i + bs])).to(device)
             logit, mu, sigma = model(xb)
-            zq = mu.unsqueeze(1) + sqrt2 * sigma.unsqueeze(1) * gx   # (b, 20)
+            zq = mu.unsqueeze(1) + sqrt2 * sigma.unsqueeze(1) * gx   # (b, nodes)
             equad = (F.softplus(zq) * gw).sum(dim=1) * inv_sqrt_pi
             p = torch.sigmoid(logit)
             outs.append((p * equad).float().cpu().numpy())
@@ -244,7 +232,8 @@ def train_one(X, ylog, logy, Xv, ylv, cfg, seed, device, epochs,
             if out_of_budget:
                 break
             continue
-        pred_log = predict_log(model, Xv, device).astype(np.float64)
+        pred_log = predict_log(model, Xv, device,
+                               gh_nodes=cfg["gh_nodes"]).astype(np.float64)
         score = float(np.sqrt(np.mean((np.clip(pred_log, 0, None) - ylv) ** 2)))
         mark = ""
         if not np.isfinite(score):
@@ -311,7 +300,20 @@ def main():
     ap.add_argument("--grad-clip", type=float, default=5.0,
                     help="max grad norm (0 disables)")
     ap.add_argument("--hidden", type=str, default="512,256")
+    ap.add_argument("--gh-nodes", type=int, default=GH_NODES_DEFAULT,
+                    help="Gauss-Hermite nodes for E[softplus(Z)] in the decode "
+                         "(default 20 = historical). Affects only the accuracy of "
+                         "that integral, never training; softplus is analytic, so "
+                         "over the reachable head box (sigma <= 2.6, mu 2.8..6.3) "
+                         "20 nodes already sit within 7e-9 of exact")
     ap.add_argument("--drop-cols", type=str, default="")
+    ap.add_argument("--feat-prep", choices=PREP_MODES, default="clip99",
+                    help="feature preprocessing (featprep.py). clip99 is the "
+                         "historical path bit-for-bit: median-impute -> clip to "
+                         "train [p1,p99] -> standardize. The p99 clip was never "
+                         "chosen deliberately and it discards exactly the right "
+                         "tail that separates big spenders, so clip999 / noclip / "
+                         "signlog / rank are the alternatives worth measuring")
     ap.add_argument("--es-metric", choices=("raw", "cal"), default="raw",
                     help="early-stopping criterion: raw val RMSLE (default, keeps "
                          "historical behaviour bit-for-bit) or the honest calibrated "
@@ -347,7 +349,8 @@ def main():
     device = args.device or ("mps" if torch.backends.mps.is_available() else "cpu")
     cfg = dict(hidden=[int(h) for h in args.hidden.split(",")], dropout=args.dropout,
                lr=args.lr, wd=args.wd, bs=args.batch, patience=args.patience,
-               bce_w=args.bce_w, grad_clip=args.grad_clip)
+               bce_w=args.bce_w, grad_clip=args.grad_clip,
+               gh_nodes=args.gh_nodes)
     print(f"device={device} seeds={seeds} smoke={args.smoke} cfg={cfg}", flush=True)
 
     t0 = time.time()
@@ -404,9 +407,10 @@ def main():
     print(f"X {(n_tr, d)}, Xgap {(n_gap, d)}, Xv {(nv, d)}, "
           f"load {time.time()-t0:.0f}s", flush=True)
 
-    stats = fit_stats(Xfull[:n_tr])                # train-only stats
-    apply_stats(Xfull, stats)                      # transform all rows in place
-    print(f"preprocess done {time.time()-t0:.0f}s", flush=True)
+    stats = fit_stats(Xfull[:n_tr], args.feat_prep)   # train-only stats
+    apply_stats(Xfull, stats)                         # transform all rows in place
+    prep_tag = "" if args.feat_prep == "clip99" else f" [{args.feat_prep}]"
+    print(f"preprocess done{prep_tag} {time.time()-t0:.0f}s", flush=True)
 
     X, Xv = Xfull[:n_tr], Xfull[n_tr + n_gap:]
     ylog, logy = ylog_full[:n_tr], logy_full[:n_tr]
@@ -428,7 +432,8 @@ def main():
         m, be, _ = train_one(X, ylog, logy, Xv, ylv, cfg, seed, device,
                              args.epochs, max_steps=max_steps, tag=f"[s{seed}] ",
                              es_cal=es_cal)
-        pv_log, (hp, hmu, hsg) = predict_log(m, Xv, device, collect_heads=True)
+        pv_log, (hp, hmu, hsg) = predict_log(m, Xv, device, collect_heads=True,
+                                             gh_nodes=args.gh_nodes)
         pv = np.expm1(np.clip(pv_log, 0, None))
         print(f"[s{seed}] best_epoch={be} val_rmsle={rmsle(yv_raw, pv):.6f} "
               f"{head_summary(hp, hmu, hsg)}", flush=True)
@@ -460,7 +465,8 @@ def main():
     # freeze: what inference needs to rebuild this model besides the weights
     save_meta(args.name, kind="mlpziln", feature_cols=cols, cfg=cfg,
               seeds=seeds, best_epochs=best_epochs, d_in=d, device=device,
-              gap_days=args.gap_days, gh_points=len(GH_X),
+              gap_days=args.gap_days, gh_points=args.gh_nodes,
+              feat_prep=args.feat_prep,
               sigma_max=SIGMA_MAX, val_rmsle=float(score),
               stats_npz=f"{args.name}_stats.npz",
               weights=[f"{args.name}_seed{s}.pt" for s in seeds])
@@ -470,6 +476,10 @@ def main():
         f"{len(tr_anchors)}anch ep={best_epochs}")
     if args.es_metric != "raw":
         notes = f"{notes}; es={args.es_metric}"
+    if args.feat_prep != "clip99":
+        notes = f"{notes}; prep={args.feat_prep}"
+    if args.gh_nodes != GH_NODES_DEFAULT:
+        notes = f"{notes}; gh={args.gh_nodes}"
     log_score(args.name, score, notes)
 
     if args.no_test:
@@ -488,7 +498,8 @@ def main():
     for seed, be in zip(seeds, best_epochs):
         m, _, _ = train_one(Xfull, ylog_full, logy_full, None, None, cfg, seed,
                             device, max(1, be), tag=f"[s{seed} full] ")
-        test_preds.append(np.expm1(np.clip(predict_log(m, Xt, device), 0, None)))
+        test_preds.append(np.expm1(np.clip(
+            predict_log(m, Xt, device, gh_nodes=args.gh_nodes), 0, None)))
         save_torch(args.name, m, seed)   # retrain weights -> work/models/
         del m
     save_preds(args.name, "test", uid_t, np.mean(test_preds, axis=0))

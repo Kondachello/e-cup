@@ -853,7 +853,8 @@
  "missing": [],
  "best_prep": "clip99",
  "best_prep_delta": 0.0,
- "best_kbins": "bin:63",
+ "best_kbins": 31,
+ "kbins_flat": true,
  "gh_nodes": {
   "tested": [
    4,

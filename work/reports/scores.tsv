@@ -354,3 +354,137 @@ fusion_v3_escal555	1.696810	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk
 fusion_v3_escal42	1.698175	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=42 best_steps=[1476] per_seed=[1.69817] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine42 с тем же сидом и сеткой оценки, но по сырому
 fusion_v3_escal7	1.685776	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=7 best_steps=[2706] per_seed=[1.68578] критерий ранней остановки по КАЛИБРОВАННОМУ скору с честным разрезом; парный контроль fusion_v3_fine7 с тем же сидом и сеткой оценки, но по сырому
 fusion_v3_e6_555	1.684636	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 eval_every=492 es=cal seeds=555 best_steps=[2460] per_seed=[1.68464] калиброванный критерий остановки + 6 эпох: калиброванный скор на 3 эпохах до конца бюджета не вышел на плато (1.66868 на шаге 2706 и всё ещё падал)
+fusion_v3_e6_42	1.689780	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep6 eval_every=492 es=cal seeds=42 best_steps=[1476] per_seed=[1.68978] калиброванный критерий остановки + 6 эпох: калиброванный скор на 3 эпохах до конца бюджета не вышел на плато (1.66868 на шаге 2706 и всё ещё падал)
+fusion_v3c555	1.685609	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=492 es=cal seeds=555 best_steps=[2460] per_seed=[1.68561] критерий остановки по КАЛИБРОВАННОМУ скору: замерено +0.001654 на сиде 555 (1.668676 против 1.670330), сырой критерий обрывал обучение вчетверо раньше
+fusion_v3c42	1.698175	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=492 es=cal seeds=42 best_steps=[1476] per_seed=[1.69817] критерий остановки по КАЛИБРОВАННОМУ скору: замерено +0.001654 на сиде 555 (1.668676 против 1.670330), сырой критерий обрывал обучение вчетверо раньше
+fusion_v3c7	1.700690	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=492 es=cal seeds=7 best_steps=[2952] per_seed=[1.70069] критерий остановки по КАЛИБРОВАННОМУ скору: замерено +0.001654 на сиде 555 (1.668676 против 1.670330), сырой критерий обрывал обучение вчетверо раньше
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+fusion_v3c_avg_cal	1.667810	binned log-shift calibration of fusion_v3c_avg; holdout 1.693159->1.668080
+blend_opt	1.666308	re-optimised blend: lib=B_plus_cal(188) method=nnls_free alpha_rel=0.0; OOF(5f by user)=1.666419; current mix val 1.667432; w={'fusion_v3c_avg_cal': 0.3059, 'fusion_v3ctl_cal': 0.1496, 'c_ts2_s7_cal': 0.107, 'c_ts2_s42_cal': 0.0796, 'wklin': 0.0688, 'behavonly_avg_cal': 0.055, 'seq2tr_f_cal': 0.0461, 'weak_an_d_cal': 0.0412, 'countaov_s7_cal': 0.0245, 'weak_ft_recency_cal': 0.0243, 'wklin_wk': 0.0205, 'hmmsim_cal': 0.0165, 'weak_ft_counts_cal': 0.016, 'weak_ft_long90_cal': 0.013, 'twl_v7_cal': 0.0122, 'febspec2_cal': 0.0113, 'hmmsim': 0.0071, 'c_xtw_s42': 0.0062}
+es_ziln_raw42	1.676925	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_ziln_cal42	1.684804	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal
+es_ziln_raw1337	1.680839	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_ziln_cal1337	1.682801	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal
+fusion_v3_swp555	1.696810	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=555 best_steps=[2706] per_seed=[1.69681] развёртка усреднения контрольных точек k=1..N, оба метода, оба режима; флаги усреднения ВЫКЛЮЧЕНЫ, поэтому val обязан совпасть с fusion_v3_escal555 побитово
+fusion_v3_swp7	1.685776	fusion3 seq3 L112 ch12 conv7-tr2 + tab203->256 trunk384,256 hurdle bce_w0.7 aux0.3 do0.15 b2048 lr0.001 wd1e-05 ep3 eval_every=246 es=cal seeds=7 best_steps=[2706] per_seed=[1.68578] развёртка усреднения контрольных точек k=1..N, оба метода, оба режима; флаги усреднения ВЫКЛЮЧЕНЫ, поэтому val обязан совпасть с fusion_v3_escal7 побитово
+es_bin_raw42	1.677335	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; holdout raw=1.677656 cal=1.671047
+es_bin_cal42	1.684373	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal; holdout raw=1.684530 cal=1.670183
+mlpziln_c42	1.684804	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000612, интервал [-0.000909,-0.000296]; сырой останавливал на эпохе 1-4 вместо 6-7; es=cal
+mlpziln_c1337	1.682801	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000612, интервал [-0.000909,-0.000296]; сырой останавливал на эпохе 1-4 вместо 6-7; es=cal
+mlpziln_c7	1.680350	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000612, интервал [-0.000909,-0.000296]; сырой останавливал на эпохе 1-4 вместо 6-7; es=cal
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpziln_cal_avg	1.681428	seed-avg of 3: ['mlpziln_c42', 'mlpziln_c1337', 'mlpziln_c7']; лучший одиночный 1.680350
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+mlpziln_cal_avg_cal	1.668572	binned log-shift calibration of mlpziln_cal_avg; holdout 1.681616->1.668967
+blend_opt	1.666302	re-optimised blend: lib=B_plus_cal(193) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666419; current mix val 1.667432; w={'fusion_v3c_avg_cal': 0.2307, 'fusion_v3ctl_cal': 0.151, 'c_ts2_s7_cal': 0.0906, 'mlpziln_cal_avg_cal': 0.0772, 'c_ts2_s42_cal': 0.0756, 'wklin': 0.0672, 'behavonly_avg_cal': 0.0575, 'seq2tr_f_cal': 0.049, 'weak_an_d_cal': 0.0438, 'weak_ft_recency_cal': 0.0239, 'countaov_s7_cal': 0.0233, 'wklin_wk': 0.0194, 'weak_ft_counts_cal': 0.0173, 'hmmsim_cal': 0.0167, 'fusion_v3_cal': 0.0156, 'twl_v7_cal': 0.0145, 'febspec2_cal': 0.0125, 'hmmsim': 0.0074, 'weak_ft_long90_cal': 0.0073, 'c_xtw_s42': 0.0044}
+es_bin_raw1337	1.680363	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; holdout raw=1.680638 cal=1.669806
+es_bin_cal1337	1.681917	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal; holdout raw=1.682387 cal=1.669679
+mlpziln_cb	1.676484	калиброванный критерий, структура сидов та же, что у mlpziln_b — честное сравнение девять сидов против девяти; es=cal
+mlpziln_cc	1.679161	калиброванный критерий, структура сидов та же, что у mlpziln_c — честное сравнение девять сидов против девяти; es=cal
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpziln_c9_avg	1.677532	seed-avg of 2: ['mlpziln_cb', 'mlpziln_cc']; лучший одиночный 1.676484
+mlpziln_cal_avg	1.681428	seed-avg of 3: ['mlpziln_c42', 'mlpziln_c1337', 'mlpziln_c7']; лучший одиночный 1.680350
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+mlpziln_c9_avg_cal	1.668229	binned log-shift calibration of mlpziln_c9_avg; holdout 1.677788->1.668645
+blend_opt	1.666302	re-optimised blend: lib=B_plus_cal(197) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666419; current mix val 1.667432; w={'fusion_v3c_avg_cal': 0.2307, 'fusion_v3ctl_cal': 0.151, 'c_ts2_s7_cal': 0.0906, 'mlpziln_cal_avg_cal': 0.0772, 'c_ts2_s42_cal': 0.0756, 'wklin': 0.0672, 'behavonly_avg_cal': 0.0575, 'seq2tr_f_cal': 0.049, 'weak_an_d_cal': 0.0438, 'weak_ft_recency_cal': 0.0239, 'countaov_s7_cal': 0.0233, 'wklin_wk': 0.0194, 'weak_ft_counts_cal': 0.0173, 'hmmsim_cal': 0.0167, 'fusion_v3_cal': 0.0156, 'twl_v7_cal': 0.0145, 'febspec2_cal': 0.0125, 'hmmsim': 0.0074, 'weak_ft_long90_cal': 0.0073, 'c_xtw_s42': 0.0044}
+mlpbin_ca	1.684069	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000568; структура сидов как у оригинала mlpbin; es=cal; holdout raw=1.684357 cal=1.669237
+mlpziln_ca	1.681737	калиброванный критерий, структура сидов та же, что у mlpziln — честное сравнение девять сидов против девяти; es=cal
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpziln_c9_avg	1.678646	seed-avg of 3: ['mlpziln_ca', 'mlpziln_cb', 'mlpziln_cc']; лучший одиночный 1.676484
+mlpziln_cal_avg	1.681428	seed-avg of 3: ['mlpziln_c42', 'mlpziln_c1337', 'mlpziln_c7']; лучший одиночный 1.680350
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+mlpziln_c9_avg_cal	1.668173	binned log-shift calibration of mlpziln_c9_avg; holdout 1.678885->1.668584
+mlpbin_cb	1.679282	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000568; структура сидов как у оригинала mlpbin; es=cal; holdout raw=1.679506 cal=1.669187
+mlpbin_cc	1.682946	калиброванный критерий остановки: подтверждено на двух сидах, средняя дельта -0.000568; структура сидов как у оригинала mlpbin; es=cal; holdout raw=1.683131 cal=1.669536
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_c9_avg	1.681632	seed-avg of 3: ['mlpbin_ca', 'mlpbin_cb', 'mlpbin_cc']; лучший одиночный 1.679282
+mlpziln_c9_avg	1.678646	seed-avg of 3: ['mlpziln_ca', 'mlpziln_cb', 'mlpziln_cc']; лучший одиночный 1.676484
+mlpziln_cal_avg	1.681428	seed-avg of 3: ['mlpziln_c42', 'mlpziln_c1337', 'mlpziln_c7']; лучший одиночный 1.680350
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+mlpziln_c9_avg_cal	1.668173	binned log-shift calibration of mlpziln_c9_avg; holdout 1.678885->1.668584
+mlpbin_c9_avg_cal	1.668518	binned log-shift calibration of mlpbin_c9_avg; holdout 1.681868->1.669019
+blend_opt	1.666302	re-optimised blend: lib=B_plus_cal(203) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.666419; current mix val 1.667432; w={'fusion_v3c_avg_cal': 0.2307, 'fusion_v3ctl_cal': 0.151, 'c_ts2_s7_cal': 0.0906, 'mlpziln_cal_avg_cal': 0.0772, 'c_ts2_s42_cal': 0.0756, 'wklin': 0.0672, 'behavonly_avg_cal': 0.0575, 'seq2tr_f_cal': 0.049, 'weak_an_d_cal': 0.0438, 'weak_ft_recency_cal': 0.0239, 'countaov_s7_cal': 0.0233, 'wklin_wk': 0.0194, 'weak_ft_counts_cal': 0.0173, 'hmmsim_cal': 0.0167, 'fusion_v3_cal': 0.0157, 'twl_v7_cal': 0.0145, 'febspec2_cal': 0.0125, 'hmmsim': 0.0074, 'weak_ft_long90_cal': 0.0073, 'c_xtw_s42': 0.0044}
+es_twl_raw42	1.694155	парный замер критерия ранней остановки у БУСТИНГА: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_twl_cal42	1.694288	парный замер критерия ранней остановки у БУСТИНГА: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_cts2_raw42	1.692342	парный замер критерия ранней остановки у БУСТИНГА: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_cts2_cal42	1.693077	парный замер критерия ранней остановки у БУСТИНГА: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_mlp2_raw42	1.683104	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_mlp2_cal42	1.687536	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal
+es_mlp2_raw1337	1.683984	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val
+es_mlp2_cal1337	1.684463	парный замер критерия ранней остановки: единственное отличие между плечами — значение --es-metric; сравнение только по калиброванному val; es=cal
+fp_mlp2_signlog_42	1.691662	парный замер подготовки признаков: единственное отличие от es_mlp2_cal42 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog
+fp_mlp2_signlog_1337	1.682403	парный замер подготовки признаков: единственное отличие от es_mlp2_cal1337 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog
+fp_bin_signlog_42	1.672572	парный замер подготовки признаков: единственное отличие от es_bin_cal42 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog; holdout raw=1.673149 cal=1.671991
+fp_bin_signlog_1337	1.685983	парный замер подготовки признаков: единственное отличие от es_bin_cal1337 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog; holdout raw=1.686673 cal=1.671837
+fp_ziln_signlog_42	1.675129	парный замер подготовки признаков: единственное отличие от es_ziln_cal42 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog
+fp_ziln_signlog_1337	1.686579	парный замер подготовки признаков: единственное отличие от es_ziln_cal1337 — значение --feat-prep (signlog); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=signlog
+fp_mlp2_clip999_42	1.687531	парный замер подготовки признаков: единственное отличие от es_mlp2_cal42 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999
+fp_mlp2_clip999_1337	1.679186	парный замер подготовки признаков: единственное отличие от es_mlp2_cal1337 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999
+fp_bin_clip999_42	1.684009	парный замер подготовки признаков: единственное отличие от es_bin_cal42 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999; holdout raw=1.684160 cal=1.670076
+fp_bin_clip999_1337	1.681622	парный замер подготовки признаков: единственное отличие от es_bin_cal1337 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999; holdout raw=1.682082 cal=1.669505
+fp_ziln_clip999_42	1.680249	парный замер подготовки признаков: единственное отличие от es_ziln_cal42 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999
+fp_ziln_clip999_1337	1.686087	парный замер подготовки признаков: единственное отличие от es_ziln_cal1337 — значение --feat-prep (clip999); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=clip999
+fp_mlp2_rank_42	1.687998	парный замер подготовки признаков: единственное отличие от es_mlp2_cal42 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank
+fp_mlp2_rank_1337	1.682061	парный замер подготовки признаков: единственное отличие от es_mlp2_cal1337 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank
+fp_bin_rank_42	1.695031	парный замер подготовки признаков: единственное отличие от es_bin_cal42 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank; holdout raw=1.695189 cal=1.671533
+fp_bin_rank_1337	1.684167	парный замер подготовки признаков: единственное отличие от es_bin_cal1337 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank; holdout raw=1.684637 cal=1.671789
+fp_ziln_rank_42	1.702723	парный замер подготовки признаков: единственное отличие от es_ziln_cal42 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank
+fp_ziln_rank_1337	1.695505	парный замер подготовки признаков: единственное отличие от es_ziln_cal1337 — значение --feat-prep (rank); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=rank
+kb_bin_k15_42	1.684703	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal42 — значение --k-bins (15); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.685011 cal=1.670693
+kb_bin_k15_1337	1.681942	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal1337 — значение --k-bins (15); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.682314 cal=1.669621
+kb_bin_k63_42	1.687428	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal42 — значение --k-bins (63); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.687614 cal=1.670189
+kb_bin_k63_1337	1.682773	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal1337 — значение --k-bins (63); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.683318 cal=1.670015
+kb_bin_k127_42	1.687291	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal42 — значение --k-bins (127); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.687553 cal=1.670215
+kb_bin_k127_1337	1.690171	парный замер числа бинов выходной головы: единственное отличие от es_bin_cal1337 — значение --k-bins (127); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; holdout raw=1.690372 cal=1.669794
+fp_mlp2_noclip_42	1.835907	парный замер подготовки признаков: единственное отличие от es_mlp2_cal42 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip
+fp_mlp2_noclip_1337	1.887443	парный замер подготовки признаков: единственное отличие от es_mlp2_cal1337 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip
+fp_bin_noclip_42	1.728878	парный замер подготовки признаков: единственное отличие от es_bin_cal42 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip; holdout raw=1.729754 cal=1.718198
+fp_bin_noclip_1337	1.724003	парный замер подготовки признаков: единственное отличие от es_bin_cal1337 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip; holdout raw=1.725601 cal=1.719086
+fp_ziln_noclip_42	1.767192	парный замер подготовки признаков: единственное отличие от es_ziln_cal42 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip
+fp_ziln_noclip_1337	1.871788	парный замер подготовки признаков: единственное отличие от es_ziln_cal1337 — значение --feat-prep (noclip); обе стороны с --es-metric cal, сравнение только по калиброванному val с честным разрезом; es=cal; prep=noclip

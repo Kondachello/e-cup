@@ -23,9 +23,42 @@
    "delta_2fold": -2.4e-05,
    "delta_raw": 0.000133,
    "same_checkpoint": false
+  },
+  {
+   "family": "cts2",
+   "config": "lgb two_stage, 14 anchors (c_ts2 config)",
+   "seed": 42,
+   "raw_raw": 1.692342,
+   "raw_cal": 1.668484,
+   "raw_cal_2fold": 1.668456,
+   "raw_log": {
+    "stop_iter": "stage1 178 stage2 76"
+   },
+   "cal_raw": 1.693077,
+   "cal_cal": 1.668457,
+   "cal_cal_2fold": 1.668445,
+   "cal_log": {
+    "stop_iter": "stage1 178 stage2 141",
+    "n_cal": 35,
+    "cal_total_s": 2.0,
+    "cal_per_eval_s": 0.056
+   },
+   "delta": -2.7e-05,
+   "delta_2fold": -1.1e-05,
+   "delta_raw": 0.000735,
+   "same_checkpoint": false
   }
  ],
  "per_family": {
+  "cts2": {
+   "n_seeds": 1,
+   "delta_cal_mean": -2.7e-05,
+   "delta_cal_ci95": [
+    -0.000131,
+    7.4e-05
+   ],
+   "verdict": "NOISE (|delta| <= 0.0003)"
+  },
   "twl": {
    "n_seeds": 1,
    "delta_cal_mean": 1e-06,
@@ -36,7 +69,7 @@
    "verdict": "NOISE (|delta| <= 0.0003)"
   }
  },
- "delta_cal_mean_all": 1e-06,
+ "delta_cal_mean_all": -1.3e-05,
  "missing": [],
  "two_stage_handling": "stage2 stops on the honest calibrated RMSLE of the FINAL forecast p1*mu (stage 1 frozen); stage 1 keeps AUC, which is level-free and therefore immune to the defect, and has no final forecast to score anyway",
  "verdict": "NOISE (|delta| <= 0.0003)"
