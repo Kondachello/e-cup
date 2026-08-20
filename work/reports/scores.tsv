@@ -393,3 +393,9 @@ lagdir_smoke0	1.696604	direct stale-conditioned tweedie, k=0 as feature; lags (0
 lagdir_smoke28	1.752019	direct stale-conditioned tweedie, k=28 as feature; lags (0, 14, 28, 42), it=49
 lagdir0	1.696604	direct stale-conditioned tweedie, k=0 as feature; lags (0, 14, 28, 42), it=49
 lagdir28	1.752019	direct stale-conditioned tweedie, k=28 as feature; lags (0, 14, 28, 42), it=49
+cens_ctl	1.689886	censored-anchors control, 12 якорей, it=57
+cens_on	2.031000	censored-anchors +3 свежих (obs 23/16/9), obs_days ПРИЗНАКОМ; контроль 1.689886 -> обвал +0.341: дерево учитывает режим только сплитом, строки дробятся вместо объединения
+cens2_ctl	1.689886	censored-anchors control, 12 якорей, it=57
+cens2_on	1.837241	censored-anchors +3 свежих, ЭКСПОЗИЦИЯ t*30/obs + вес строки obs/30; контроль 1.689886 -> 1.837241, ущерб уполовинен но направление мёртво: нулевая масса не масштабируется (70% нулей за 9д против 46% за 30д)
+kostya46	1.669945	взят из ветки kostet; ЗАПАС +0.00137, честный вклад один +0.000209
+SET_olya_v2	-	набор kostya46+lagd28+gru_final+lagd42: честный вклад +0.000474 — ГОДИТСЯ (порог 0.0003), веса 0.220/0.034/0.086/0.012 при бленде 0.651
