@@ -105,7 +105,11 @@ def main():
                        (("", calibrate_honest(lp_raw, ly, args.bins, args.seed)),):
             sm = score(lp, ly)
             e = lp - ly
-            rho = float(np.corrcoef(e, eb)[0, 1])
+            # UNcentered correlation: the identity margin = sb/sm - rho holds for
+            # E[e*eb]/(sm*sb), not for corrcoef. Zhenya measured the difference: corrcoef
+            # distorted 6 of 30 models - every uncalibrated one (mean error != 0). After
+            # calibration the two coincide, so old numbers on _cal models stand.
+            rho = float(np.mean(e * eb) / (sm * sb))
             margin = sb / sm - rho
             # the identity is margin = (sb/sm)(1 - beta): margin <= 0 means beta >= 1, i.e. the
             # optimiser gives this model zero weight. Squaring a negative margin would turn a

@@ -28,6 +28,33 @@ from model_io import booster_filename, save_booster, save_meta
 RETRAIN_ITER_MULT = 1.07
 
 
+# Recency bins. The inference universe was selected as "active in the last 30 days", so
+# the 30+ bin has probability zero at val and test while carrying 6-8% of training rows.
+# Straight adversarial weighting p/(1-p) over all features is degenerate here (F6: the
+# classifier separates anchors at AUC 1.0000 on calendar artefacts alone), so the ratio is
+# taken on the one axis where the shift was actually measured.
+REC_BINS = [0, 1, 2, 3, 5, 8, 13, 21, 30]
+
+
+def recency_weights(tr_rec: np.ndarray, val_rec: np.ndarray, floor: float, cap: float = 5.0):
+    """w_i = p_inference(bin_i) / p_train(bin_i), clipped to [floor, cap]."""
+    tb = np.digitize(tr_rec, REC_BINS)
+    vb = np.digitize(val_rec, REC_BINS)
+    nb = len(REC_BINS) + 1
+    p_tr = np.bincount(tb, minlength=nb).astype(np.float64) / len(tb)
+    p_val = np.bincount(vb, minlength=nb).astype(np.float64) / len(vb)
+    ratio = np.divide(p_val, p_tr, out=np.zeros(nb), where=p_tr > 0)
+    ratio = np.clip(ratio, floor, cap)
+    ratio /= (ratio[tb]).mean()          # keep the effective sample size comparable
+    for b in range(nb):
+        if p_tr[b] > 0:
+            lo = REC_BINS[b - 1] if b else 0
+            hi = REC_BINS[b] if b < len(REC_BINS) else 999
+            print(f"    rec [{lo:3d},{hi:3d}) train {p_tr[b]:.4f} infer {p_val[b]:.4f} "
+                  f"-> вес {ratio[b]:.3f}", flush=True)
+    return ratio[tb]
+
+
 def anchor_weights(anchors, rows_per_anchor, tau):
     if not tau:
         return None
@@ -125,6 +152,10 @@ def main():
     ap.add_argument("--active-only", action="store_true",
                     help="keep only train rows with activity in last 30d (matches test universe)")
     ap.add_argument("--weight-tau", type=float, default=0.0)
+    ap.add_argument("--reweight-recency", type=float, default=0.0, metavar="FLOOR",
+                    help="density-ratio row weights matching train recency to inference "
+                         "(O6, the soft version of --active-only); FLOOR is the smallest "
+                         "weight a row may get, e.g. 0.05. 0 disables.")
     ap.add_argument("--drop-cols", type=str, default="")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--threads", type=int, default=0)
@@ -179,6 +210,11 @@ def main():
     X = tr.select(cols).to_numpy().astype(np.float32)
     y_raw = tr["target"].to_numpy().astype(np.float64)
     w = anchor_weights(tr_anchors, rows_per, args.weight_tau)
+    if args.reweight_recency:
+        print("reweight-recency: отношение плотностей по свежести активности", flush=True)
+        rw = recency_weights(tr["rec_active"].to_numpy(),
+                             val["rec_active"].to_numpy(), args.reweight_recency)
+        w = rw if w is None else w * rw
     del tr
     Xv = val.select(cols).to_numpy().astype(np.float32)
     yv_raw = val["target"].to_numpy().astype(np.float64)

@@ -14,7 +14,10 @@ import subprocess
 import time
 from pathlib import Path
 
-WORK = Path("/Users/alexanderkondakov/ozon-cup/work")
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
+WORK = ROOT / "work"
+# Job shell: zsh on the mac this was written for, bash elsewhere. $SHELL wins if set.
+SHELL = os.environ.get("QUEUE_SHELL") or (shutil.which("zsh") or shutil.which("bash") or "/bin/sh")
 Q = WORK / "queue"
 DONE = Q / "done"
 Q.mkdir(exist_ok=True)
@@ -30,7 +33,16 @@ def log(msg: str):
 
 
 def free_mem_pct() -> int:
+    # Linux: MemAvailable/MemTotal from /proc. macOS: memory_pressure -Q.
     try:
+        meminfo = Path("/proc/meminfo")
+        if meminfo.exists():
+            vals = {}
+            for line in meminfo.read_text().splitlines():
+                k, _, rest = line.partition(":")
+                vals[k] = float(rest.strip().split()[0])
+            if vals.get("MemTotal"):
+                return int(100 * vals.get("MemAvailable", 0) / vals["MemTotal"])
         out = subprocess.run(["memory_pressure", "-Q"], capture_output=True, text=True, timeout=10).stdout
         for tok in out.split():
             if tok.endswith("%"):
@@ -41,7 +53,7 @@ def free_mem_pct() -> int:
 
 
 def disk_free_gb() -> float:
-    st = os.statvfs("/")
+    st = os.statvfs(str(ROOT))
     return st.f_bavail * st.f_frsize / 1e9
 
 
@@ -87,8 +99,8 @@ def main():
         t0 = time.time()
         job_log = WORK / "reports" / f"job_{name}.log"
         with open(job_log, "w") as lf:
-            r = subprocess.run(["/bin/zsh", "-c", spec["cmd"]], env=env,
-                               cwd="/Users/alexanderkondakov/ozon-cup",
+            r = subprocess.run([SHELL, "-c", spec["cmd"]], env=env,
+                               cwd=str(ROOT),
                                stdout=lf, stderr=subprocess.STDOUT, text=True)
         dt = time.time() - t0
         tail = open(job_log).read()[-600:]

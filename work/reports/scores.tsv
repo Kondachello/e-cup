@@ -372,3 +372,20 @@ lagd42	1.767829	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features
 lagd56	1.791567	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-19; ЗАПАС +0.00091; честный вклад -0.000019
 lagd70	1.807626	lag-TTA champion tw1.45-on-log cut2025-11-04 n9 it=655; features at 2025-11-05; ЗАПАС +0.00014 — застоялость исчерпана
 tabpfn_probe	-	пробник остатка бленда TabPFN-2.5: mdl_flint real -0.01159 vs placebo -0.00114 (2 контекста x4000, оценка 4000) — сигнала нет, теорема оболочки подтверждена снаружи зоопарка
+kalman_smoke	1.725145	kalman mu+AR(1) по 6 окнам x30д, БЕЗ признаков; p=0.4337 q=0.1923 lam=0.7173
+kalman	1.714244	kalman mu+AR(1) по 12 окнам x30д, БЕЗ признаков; p=0.4476 q=0.1779 lam=0.7264
+ts2lag0	1.687621	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2026-01-14
+ts2lag14	1.722931	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-31
+ts2lag28	1.749881	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-17
+ts2lag42	1.767153	lag-TTA two_stage cut2025-12-02 n11 it=151; features at 2025-12-03
+lagB0	1.685024	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2026-01-14
+lagB28	1.749356	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2025-12-17
+lagB42	1.768863	lag-TTA tweedie cut2025-12-02 n11 it=428; features at 2025-12-03
+lagC0	1.685294	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2026-01-14
+lagC28	1.749690	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2025-12-17
+lagC42	1.768891	lag-TTA tweedie cut2025-12-02 n11 it=561; features at 2025-12-03
+tsb	2.106544	TSB intermittent demand, ap=0.02 az=0.3 выбраны на DEC31; 30*p*z, без признаков
+hawkes	1.878159	hawkes event-stream: alpha=0.65 beta=1/3.5d выбраны на DEC31; все 409 дней, интервалы вместо матрицы
+auniv_ctl	1.689437	lgb/log_mse
+auniv_on	1.690587	lgb/log_mse
+auniv_soft	1.690916	lgb/log_mse

@@ -54,6 +54,13 @@ def main():
     ap.add_argument("--rounds", type=int, default=2500)
     ap.add_argument("--test", action="store_true",
                     help="also emit test predictions for the WINNING vintage (exp_lib contract)")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--objective", default="tweedie", choices=["tweedie", "two_stage"],
+                    help="two_stage = classifier x regressor, a different loss on the same vintages")
+    ap.add_argument("--test-vintage", default="2026-01-14",
+                    help="feature date for the test-side prediction (30d stale by default)")
+    ap.add_argument("--test-name", default="",
+                    help="output name; default PREFIX28 for backward compatibility")
     ap.add_argument("--test-only", type=int, default=0, metavar="VAL_ITER",
                     help="skip the val pass and emit only test preds, reusing a known val it=")
     args = ap.parse_args()
@@ -94,38 +101,59 @@ def main():
     print(f"X {X.shape}, Xv {Xv.shape}, load {time.time()-t0:.0f}s", flush=True)
 
     import lightgbm as lgb
-    params = dict(
-        objective="tweedie", tweedie_variance_power=1.45, metric="rmse",
-        learning_rate=0.05, num_leaves=255, min_data_in_leaf=300,
-        feature_fraction=0.75, bagging_fraction=0.8, bagging_freq=1,
-        lambda_l2=5.0, max_bin=127, num_threads=7, seed=42, verbosity=-1,
-    )
-    dtr = lgb.Dataset(X, y, free_raw_data=True)
-    dv = lgb.Dataset(Xv, yv, reference=dtr, free_raw_data=True)
-    m = lgb.train(params, dtr, num_boost_round=args.rounds, valid_sets=[dv],
-                  callbacks=[lgb.early_stopping(200, verbose=False), lgb.log_evaluation(200)])
-    print(f"best_iteration={m.best_iteration}, train {time.time()-t0:.0f}s", flush=True)
-    del X, dtr, dv
+    base = dict(learning_rate=0.05, num_leaves=255, min_data_in_leaf=300,
+                feature_fraction=0.75, bagging_fraction=0.8, bagging_freq=1,
+                lambda_l2=5.0, max_bin=127, num_threads=7, seed=args.seed, verbosity=-1)
+
+    def fit(yy, yyv, extra):
+        p = dict(base, **extra)
+        d = lgb.Dataset(X, yy, free_raw_data=False)
+        dv = lgb.Dataset(Xv, yyv, reference=d, free_raw_data=False)
+        mm = lgb.train(p, d, num_boost_round=args.rounds, valid_sets=[dv],
+                       callbacks=[lgb.early_stopping(200, verbose=False),
+                                  lgb.log_evaluation(400)])
+        return mm, mm.best_iteration
+
+    if args.objective == "two_stage":
+        # P(y>0) and E[log1p | y>0] fitted separately; the vintage prediction is the product,
+        # so staleness enters both the incidence and the magnitude channel.
+        pos, posv = y > 0, yv > 0
+        m1, it1 = fit(pos.astype(np.float64), posv.astype(np.float64),
+                      dict(objective="binary", metric="auc"))
+        Xp, Xvp = X[pos], Xv[posv]
+        d2 = lgb.Dataset(Xp, y[pos], free_raw_data=False)
+        dv2 = lgb.Dataset(Xvp, yv[posv], reference=d2, free_raw_data=False)
+        m2 = lgb.train(dict(base, objective="regression", metric="rmse"), d2,
+                       num_boost_round=args.rounds, valid_sets=[dv2],
+                       callbacks=[lgb.early_stopping(200, verbose=False),
+                                  lgb.log_evaluation(400)])
+        it = m1.best_iteration
+        print(f"two_stage: it1={it1} it2={m2.best_iteration}, train {time.time()-t0:.0f}s", flush=True)
+        predict = lambda Z: np.clip(m1.predict(Z) * np.clip(m2.predict(Z), 0, None), 0, None)
+    else:
+        m, it = fit(y, yv, dict(objective="tweedie", tweedie_variance_power=1.45, metric="rmse"))
+        print(f"best_iteration={it}, train {time.time()-t0:.0f}s", flush=True)
+        predict = lambda Z: np.clip(m.predict(Z), 0, None)
+    del X
 
     lp = {}   # name -> log1p-space prediction aligned to uid
     fresh = f"{args.prefix}0"
-    lp[fresh] = np.clip(m.predict(Xv), 0, None)
+    lp[fresh] = predict(Xv)
     del Xv
     for name, anc in stale.items():
         df = load_anchor(anc, columns=["user_id"] + cols).sort("user_id")
         assert np.array_equal(df["user_id"].to_numpy(), uid), f"universe mismatch at {anc}"
-        lp[name] = np.clip(m.predict(df.select(cols).to_numpy().astype(np.float32)), 0, None)
+        lp[name] = predict(df.select(cols).to_numpy().astype(np.float32))
         del df
     if args.mixes:
         for name, w in MIXES.items():
             if all(k in lp for k in w):
                 lp[name] = np.clip(sum(v * lp[k] for k, v in w.items()), 0, None)
 
-    it = m.best_iteration
     for name, l in lp.items():
         pv = np.expm1(l)
         save_preds(name, "val", uid, pv)
-        note = (f"lag-TTA champion tw1.45-on-log cut{gap_cut} n{len(tr_anchors)} it={it}; "
+        note = (f"lag-TTA {args.objective} cut{gap_cut} n{len(tr_anchors)} it={it}; "
                 + (f"mix {MIXES[name]}" if name in MIXES else
                    f"features at {stale.get(name, VAL_ANCHOR)}"))
         log_score(name, rmsle(yv_raw, pv), note)
@@ -153,7 +181,7 @@ def emit_test(args, cols, uid_val, val_iter):
     import lightgbm as lgb
     from common import TEST_ANCHOR
 
-    vintage = date(2026, 1, 14)
+    vintage = date.fromisoformat(args.test_vintage)
     cut = vintage - timedelta(days=1)
     anchors = [a for a in available_train_anchors() if a <= cut]
     print(f"\ntest: винтаж {vintage} ({(TEST_ANCHOR - vintage).days}д застоялости), "
@@ -163,24 +191,33 @@ def emit_test(args, cols, uid_val, val_iter):
     X = tr.select(cols).to_numpy().astype(np.float32)
     y = np.log1p(np.clip(tr["target"].to_numpy().astype(np.float64), 0, None))
     del tr
-    params = dict(
-        objective="tweedie", tweedie_variance_power=1.45, learning_rate=0.05,
-        num_leaves=255, min_data_in_leaf=300, feature_fraction=0.75,
-        bagging_fraction=0.8, bagging_freq=1, lambda_l2=5.0, max_bin=127,
-        num_threads=7, seed=42, verbosity=-1,
-    )
+    base = dict(learning_rate=0.05, num_leaves=255, min_data_in_leaf=300,
+                feature_fraction=0.75, bagging_fraction=0.8, bagging_freq=1,
+                lambda_l2=5.0, max_bin=127, num_threads=7, seed=args.seed, verbosity=-1)
     # No held-out anchor is left to early-stop on, so reuse the val run's stopping point,
     # scaled by the data growth exactly as train_gbdt.py does on its retrain path.
     n_iter = max(50, int(val_iter * (1.0 + 0.7 * max(len(anchors) / 9.0 - 1.0, 0.0))))
-    print(f"test: {X.shape[0]} строк, {n_iter} итераций (val it={val_iter})", flush=True)
-    m = lgb.train(params, lgb.Dataset(X, y), num_boost_round=n_iter)
+    print(f"test: {X.shape[0]} строк, {n_iter} итераций (val it={val_iter}), "
+          f"objective={args.objective}", flush=True)
+    if args.objective == "two_stage":
+        pos = y > 0
+        m1 = lgb.train(dict(base, objective="binary"), lgb.Dataset(X, pos.astype(np.float64)),
+                       num_boost_round=n_iter)
+        m2 = lgb.train(dict(base, objective="regression"), lgb.Dataset(X[pos], y[pos]),
+                       num_boost_round=n_iter)
+        predict = lambda Z: np.clip(m1.predict(Z) * np.clip(m2.predict(Z), 0, None), 0, None)
+    else:
+        m = lgb.train(dict(base, objective="tweedie", tweedie_variance_power=1.45),
+                      lgb.Dataset(X, y), num_boost_round=n_iter)
+        predict = lambda Z: np.clip(m.predict(Z), 0, None)
     del X
 
     df = load_anchor(vintage, columns=["user_id"] + cols).sort("user_id")
     assert np.array_equal(df["user_id"].to_numpy(), uid_val), "universe mismatch at vintage"
-    pv = np.expm1(np.clip(m.predict(df.select(cols).to_numpy().astype(np.float32)), 0, None))
-    save_preds(f"{args.prefix}28", "test", uid_val, pv)
-    print(f"test: сохранено {args.prefix}28_test.parquet", flush=True)
+    pv = np.expm1(predict(df.select(cols).to_numpy().astype(np.float32)))
+    name = args.test_name or f"{args.prefix}28"
+    save_preds(name, "test", uid_val, pv)
+    print(f"test: сохранено {name}_test.parquet", flush=True)
 
 
 if __name__ == "__main__":
