@@ -12,8 +12,10 @@ Seed averaging happens on the decoded E[log1p] (before expm1).
 
 Trunk: Linear(F->512) GELU LayerNorm Dropout(0.15) -> 256 (same block) -> head
 Linear(256 -> K+1). Preprocessing (fit on train anchors only; reused for
-val/test): median-impute NaN -> clip to train [p1, p99] -> standardize. Stats
-plus bin edges/centers saved to work/models/NAME_stats.npz on non-smoke runs.
+val/test): --feat-prep, default clip99 = median-impute NaN -> clip to train
+[p1, p99] -> standardize (the historical path, bit-for-bit); alternatives
+clip999 / noclip / signlog / rank live in featprep.py. Stats plus bin
+edges/centers saved to work/models/NAME_stats.npz on non-smoke runs.
 
 Anchors: like train_gbdt --gap-days (default 30): selection trains only on
 anchors ending >= gap days before VAL (no target-window overlap with val);
@@ -54,40 +56,13 @@ from calibrate import apply_shifts, fit_shifts
 from common import (WORK, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor,
                     rmsle)
 from exp_lib import FEATURES_DIR, available_train_anchors, log_score, save_preds
+from featprep import MODES as PREP_MODES
+from featprep import apply_stats, fit_stats
 from model_io import save_meta, save_torch
 
 MODELS_DIR = WORK / "models"
-STATS_MAX_ROWS = 750_000   # row-subsample size for percentile/mean/std estimation
-BLOCK = 262_144            # rows per block for in-place transform
 SMOKE_MAX_STEPS = 200
 SMOKE_MAX_BATCH = 2048
-
-
-def fit_stats(X: np.ndarray) -> dict:
-    """Estimate impute/clip/standardize stats from a row-subsample of train."""
-    step = max(1, int(np.ceil(X.shape[0] / STATS_MAX_ROWS)))
-    S = np.ascontiguousarray(X[::step])
-    q = np.nanpercentile(S, [1.0, 50.0, 99.0], axis=0)
-    med = np.where(np.isfinite(q[1]), q[1], 0.0).astype(np.float32)
-    lo = np.where(np.isfinite(q[0]), q[0], med).astype(np.float32)
-    hi = np.where(np.isfinite(q[2]), q[2], med).astype(np.float32)
-    np.copyto(S, np.broadcast_to(med, S.shape), where=np.isnan(S))
-    np.clip(S, lo, hi, out=S)
-    mean = S.mean(axis=0, dtype=np.float64).astype(np.float32)
-    std = S.std(axis=0, dtype=np.float64).astype(np.float32)
-    std[~np.isfinite(std) | (std < 1e-7)] = 1.0
-    del S
-    return dict(med=med, lo=lo, hi=hi, mean=mean, std=std)
-
-
-def apply_stats(X: np.ndarray, s: dict) -> None:
-    """Blockwise in-place: median-impute -> clip [p1,p99] -> standardize."""
-    for i in range(0, X.shape[0], BLOCK):
-        B = X[i:i + BLOCK]
-        np.copyto(B, np.broadcast_to(s["med"], B.shape), where=np.isnan(B))
-        np.clip(B, s["lo"], s["hi"], out=B)
-        B -= s["mean"]
-        B /= s["std"]
 
 
 def assign_bins(ylog: np.ndarray, edges: np.ndarray) -> np.ndarray:
@@ -340,7 +315,10 @@ def main():
     ap.add_argument("--wd", type=float, default=1e-4)
     ap.add_argument("--dropout", type=float, default=0.15)
     ap.add_argument("--k-bins", type=int, default=31,
-                    help="positive-target quantile bins (classes = K+1)")
+                    help="positive-target quantile bins (classes = K+1). 31 was "
+                         "picked once and never swept; it trades decode "
+                         "resolution (bias: within-bin spread of log1p(y)) "
+                         "against per-class sample size (variance)")
     ap.add_argument("--label-smoothing", type=float, default=0.0,
                     help="CE label smoothing eps (e.g. 0.05); eps>0 slightly "
                          "biases the expectation decode up on zero rows")
@@ -348,6 +326,13 @@ def main():
     ap.add_argument("--norm", type=str, default="layer",
                     choices=["layer", "batch", "none"],
                     help="normalization inside each trunk block")
+    ap.add_argument("--feat-prep", choices=PREP_MODES, default="clip99",
+                    help="feature preprocessing (featprep.py). clip99 is the "
+                         "historical path bit-for-bit: median-impute -> clip to "
+                         "train [p1,p99] -> standardize. The p99 clip was never "
+                         "chosen deliberately and it discards exactly the right "
+                         "tail that separates big spenders, so clip999 / noclip / "
+                         "signlog / rank are the alternatives worth measuring")
     ap.add_argument("--warmup", type=float, default=0.0,
                     help="fraction of the planned step budget spent on linear "
                          "warmup; >0 switches the cosine schedule from per-epoch "
@@ -437,9 +422,10 @@ def main():
     print(f"X {(n_tr, d)}, Xgap {(n_gap, d)}, Xv {(nv, d)}, "
           f"load {time.time()-t0:.0f}s", flush=True)
 
-    stats = fit_stats(Xfull[:n_tr])                # train-only stats
-    apply_stats(Xfull, stats)                      # transform all rows in place
-    print(f"preprocess done {time.time()-t0:.0f}s", flush=True)
+    stats = fit_stats(Xfull[:n_tr], args.feat_prep)   # train-only stats
+    apply_stats(Xfull, stats)                         # transform all rows in place
+    prep_tag = "" if args.feat_prep == "clip99" else f" [{args.feat_prep}]"
+    print(f"preprocess done{prep_tag} {time.time()-t0:.0f}s", flush=True)
 
     X, Xv = Xfull[:n_tr], Xfull[n_tr + n_gap:]
     ylog, ylv = ylog_full[:n_tr], ylog_full[n_tr + n_gap:].astype(np.float64)
@@ -504,6 +490,7 @@ def main():
     save_meta(args.name, kind="mlpbin", feature_cols=cols, cfg=cfg, seeds=seeds,
               best_epochs=best_epochs, d_in=d, n_classes=int(len(centers)),
               k_bins=args.k_bins, device=device, gap_days=args.gap_days,
+              feat_prep=args.feat_prep,
               val_rmsle=float(score), stats_npz=f"{args.name}_stats.npz",
               weights=[f"{args.name}_seed{s}.pt" for s in seeds])
     notes = args.notes or (
@@ -513,6 +500,8 @@ def main():
         f"{len(tr_anchors)}anch ep={best_epochs}")
     if args.es_metric != "raw":
         notes = f"{notes}; es={args.es_metric}"
+    if args.feat_prep != "clip99":
+        notes = f"{notes}; prep={args.feat_prep}"
     notes = f"{notes}; holdout raw={raw_h:.6f} cal={cal_h:.6f}"
     log_score(args.name, score, notes)
 

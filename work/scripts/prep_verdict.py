@@ -211,12 +211,20 @@ def main():
                  if by_variant else None)
     if best_prep and by_variant[best_prep]["delta_mean"] >= -THRESH:
         best_prep = "clip99"          # nothing beat the historical default
+    # the baseline is an arm too: "best of the alternatives" is not "best",
+    # and every alternative here is worse than the k=31 it is measured against
+    best_kbins = min(kb, key=lambda k: kb[k]["delta_mean"]) if kb else None
+    if best_kbins and kb[best_kbins]["delta_mean"] >= -THRESH:
+        best_kbins = 31
+    else:
+        best_kbins = int(best_kbins.split(":")[1]) if best_kbins else None
     out = {
         "rows": rows, "summary": summary, "by_variant": by_variant, "missing": missing,
         "best_prep": best_prep,
         "best_prep_delta": (by_variant[best_prep]["delta_mean"]
                             if best_prep in by_variant else 0.0),
-        "best_kbins": (min(kb, key=lambda k: kb[k]["delta_mean"]) if kb else None),
+        "best_kbins": best_kbins,
+        "kbins_flat": bool(kb) and all(abs(v["delta_mean"]) <= THRESH for v in kb.values()),
         "gh_nodes": {"tested": [4, 8, 12, 16, 20, 24, 32, 64, 128], "best": 20,
                      "delta_max_abs": 0.0,
                      "note": "квадратура сошлась: |gh20-gh128| <= 1.4e-6 на строку, "

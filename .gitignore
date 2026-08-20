@@ -8,6 +8,7 @@ work/features_sub/
 work/preds/
 work/models/
 work/queue/
+work/lb_cache.npz
 submissions/
 prev_solutions/
 solution_lbmix2/artifacts/
@@ -29,3 +30,17 @@ from_gpu/
 _to_kosta/
 runlogs/
 COMMIT_MSG.txt
+# kaggle-трек: локальные артефакты сборки и смоука (0.7 ГБ, восстанавливаются за 45с)
+work/kaggle/run/
+work/colab/out/hist_*
+
+# Артефакты обучения и кэши: пересобираются скриптами, в общий репозиторий не идут.
+# 20.08 они случайно уехали в коммит слияния (git add -A без ограничения пути) —
+# 3.9 ГБ, из-за чего пуш не укладывался в лимит времени.
+work/seq3/
+work/seq2/
+work/data/*.npy
+work/data/*.npz
+work/yoy_dirs.npz
+work/reports/mb_fix_*.npz
+work/reports/mb_fix_*.npy
