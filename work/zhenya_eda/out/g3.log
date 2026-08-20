@@ -1,0 +1,22 @@
+обучающих срезов 10 (2025-08-11..2025-12-15), зазор 30; валидация 2026-01-14 n=250,000
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+база                               k= 80  сырой 1.688341  калиброванный 1.671655  разброс сидов 0.000207
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+база + DT (таксономия дня)         k=138  сырой 1.687320  калиброванный 1.671251  разброс сидов 0.000023
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+C:\Users\rut19\AppData\Local\Programs\Python\Python313\Lib\site-packages\sklearn\utils\validation.py:2749: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+база + CTL (столько же старых)     k=138  сырой 1.687822  калиброванный 1.671363  разброс сидов 0.000149
+
+DT против базы                               -0.000405
+CTL против базы (это чистая ёмкость)         -0.000293
+
+>>> DT против КОНТРОЛЯ РАВНОЙ ЁМКОСТИ        -0.000112   <- РЕШАЮЩЕЕ ЧИСЛО
+разброс между сидами ~0.000207; порог приёмки 0.0003; шум 0.000022
