@@ -1,0 +1,39 @@
+{
+ "base": "Q1_probes5.csv",
+ "sd_canon": 1.631108,
+ "delta": {
+  "mean": -0.006718,
+  "sd": 0.048696
+ },
+ "R2_newblend.csv": {
+  "mean": 2.324718,
+  "sd": 1.631108,
+  "clipped": 0
+ },
+ "ridge": {
+  "oof_gain_vs_new_blend": 0.000595,
+  "n_cols": 117,
+  "alphas": [
+   10000.0,
+   10000.0,
+   100000.0,
+   100000.0,
+   10000.0
+  ]
+ },
+ "R3_ridge.csv": {
+  "mean": 2.324745,
+  "sd": 1.631108,
+  "clipped": 0
+ },
+ "shade": {
+  "w_kostya": 0.246021,
+  "mean_delta": -0.004229,
+  "sd_delta": 0.008938
+ },
+ "R5_shade.csv": {
+  "mean": 2.324718,
+  "sd": 1.631108,
+  "clipped": 0
+ }
+}

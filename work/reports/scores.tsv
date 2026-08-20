@@ -425,3 +425,13 @@ fp_ziln_noclip_1337	1.871788	парный замер подготовки при
 kostya46_cal	1.669876	binned log-shift calibration of kostya46; holdout 1.702727->1.670440
 gseq_small_s42_cal	1.698032	binned log-shift calibration of gseq_small_s42; holdout 1.713952->1.697871
 gseq_big_s42_cal	1.677101	binned log-shift calibration of gseq_big_s42; holdout 1.716496->1.677692
+lagd0	1.688026	lag-TTA tweedie cut2025-12-02 n22 it=61; features at 2026-01-14
+lagd28	1.744269	lag-TTA tweedie cut2025-12-02 n22 it=61; features at 2025-12-17
+lagd42	1.761763	lag-TTA tweedie cut2025-12-02 n22 it=61; features at 2025-12-03
+lagd0	1.679296	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2026-01-14
+lagd14	1.715173	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2025-12-31
+lagd28	1.744574	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2025-12-17
+lagd42	1.766860	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2025-12-03
+lagd56	1.789073	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2025-11-19
+lagd70	1.803806	lag-TTA tweedie cut2025-11-04 n18 it=574; features at 2025-11-05
+blend_opt	1.665647	re-optimised blend: lib=B_plus_cal(210) method=nnls_free alpha_rel=0.0; OOF(5f by user)=1.665764; current mix val 1.667432; w={'kostya46_cal': 0.246, 'fusion_v3c_avg_cal': 0.2289, 'gseq_small_s42_cal': 0.1087, 'fusion_v3ctl_cal': 0.1061, 'wklin': 0.071, 'weak_an_d_cal': 0.0455, 'weak_ft_recency_cal': 0.0434, 'behavonly_avg_cal': 0.0414, 'lagd28': 0.035, 'c_ts2_s42_cal': 0.0333, 'gseq_big_s42_cal': 0.0244, 'fusion_f_cal': 0.0106, 'febspec2_cal': 0.0089, 'wklin_wk_cal': 0.0028}

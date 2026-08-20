@@ -1,0 +1,305 @@
+[lib] paired+filtered=226  base=129 cal=81 old_era=4 derived=12
+  A_raw_clean: 129
+  B_plus_cal: 210
+  C_plus_oldera: 214
+  D_literal_all: 226
+
+solo val RMSLE (library A/B/C members):
+  xgblog_final               1.630363  OLD-ERA
+  lgblog_final               1.633394  OLD-ERA
+  mlp_final                  1.663563  OLD-ERA
+  fusion_v3c_avg_cal         1.667810  CAL-LEAK
+  c_ts2_avg_cal              1.668111  CAL-LEAK
+  mlpziln_c9_avg_cal         1.668173  CAL-LEAK
+  fusion_avg_cal             1.668255  CAL-LEAK
+  c_ts2_s42_cal              1.668343  CAL-LEAK
+  c_ts2_s2024_cal            1.668377  CAL-LEAK
+  mlpziln_avg_cal            1.668387  CAL-LEAK
+  mlpziln_b_cal              1.668397  CAL-LEAK
+  c_ts2_s7_cal               1.668406  CAL-LEAK
+  c_ts2_s555_cal             1.668446  CAL-LEAK
+  mlpbin_c9_avg_cal          1.668518  CAL-LEAK
+  mlpziln_cal_avg_cal        1.668572  CAL-LEAK
+  fusion_v3_avg_cal          1.668594  CAL-LEAK
+  countaov_avg_cal           1.668713  CAL-LEAK
+  mlpziln_cal                1.668739  CAL-LEAK
+  fusion_f_cal               1.668794  CAL-LEAK
+  mlpbin_cal                 1.668802  CAL-LEAK
+  mlpbin_avg_cal             1.668812  CAL-LEAK
+  countaov_s7_cal            1.668900  CAL-LEAK
+  mlpbin_big_cal             1.668906  CAL-LEAK
+  fusion_v3_fine_avg_cal     1.669033  CAL-LEAK
+  mlpziln_c_cal              1.669071  CAL-LEAK
+  mlpbin_big2_cal            1.669078  CAL-LEAK
+  mlpziln_big_cal            1.669114  CAL-LEAK
+  countaov_s1337_cal         1.669117  CAL-LEAK
+  countaov_cal               1.669179  CAL-LEAK
+  twl_v5_cal                 1.669221  CAL-LEAK
+  mlpbin_bigsched_cal        1.669232  CAL-LEAK
+  twl_v7_avg_cal             1.669278  CAL-LEAK
+  mlpbin_big3_cal            1.669527  CAL-LEAK
+  twl_v7_cal                 1.669648  CAL-LEAK
+  fusion_v3_cal              1.669755  CAL-LEAK
+  kostya46_cal               1.669876  CAL-LEAK
+  fusion_v3ctl_cal           1.670016  CAL-LEAK
+  twdeep_cal                 1.670018  CAL-LEAK
+  weak_tiny_d_cal            1.670040  CAL-LEAK
+  c_dirlgb_s42_cal           1.670088  CAL-LEAK
+  twl_seqoof_cal             1.670143  CAL-LEAK
+  weak_tiny_b_cal            1.670216  CAL-LEAK
+  weak_tiny_a_cal            1.670602  CAL-LEAK
+  channel_avg_cal            1.670651  CAL-LEAK
+  weak_an_d_cal              1.670760  CAL-LEAK
+  twl_v5s_cal                1.671010  CAL-LEAK
+  channel_s1337_chcal        1.671064  CAL-LEAK
+  channel3_chcal             1.671114  CAL-LEAK
+  channel2_cal               1.671125  CAL-LEAK
+  weak_tiny_c_cal            1.671163  CAL-LEAK
+  channel_s1337_cal          1.671214  CAL-LEAK
+  c_twlog_s42_cal            1.671716  CAL-LEAK
+  mlp2_big_cal               1.672154  CAL-LEAK
+  weak_an_b_cal              1.672181  CAL-LEAK
+  mlp2_final_cal             1.672649  CAL-LEAK
+  weak_an_c_cal              1.672741  CAL-LEAK
+  wklin_cal                  1.672810  CAL-LEAK
+  weak_an_a_cal              1.673313  CAL-LEAK
+  weak_rs_d_cal              1.673879  CAL-LEAK
+  mlpbin_big3                1.674477  
+  mlpziln_big                1.674786  
+  countaov_s1337_dampfit     1.675147  CAL-LEAK
+  countaov_dampfit           1.675153  CAL-LEAK
+  countaov_s7_dampfit        1.675158  CAL-LEAK
+  wklin_base_cal             1.675416  CAL-LEAK
+  weak_rs_c_cal              1.675551  CAL-LEAK
+  mlpziln_c                  1.675688  
+  mlpziln_avg                1.676064  
+  mlpziln_b                  1.676116  
+  mlpbin                     1.676423  
+  mlpziln_cb                 1.676484  
+  mlpbin_c                   1.676665  
+  gseq_big_s42_cal           1.677101  CAL-LEAK
+  fusion_v3_fine555          1.677108  
+  fusion_v3_fine_avg         1.677117  
+  mlpbin_bigsched            1.677146  
+  mlpbin_avg                 1.677177  
+  mlpbin_big                 1.677559  
+  mlpbin_big2                1.677677  
+  mlpziln                    1.677806  
+  mlpbin_v6                  1.677845  
+  fusion_v3_fine2024         1.678275  
+  fusion_v3_s2024            1.678275  
+  mlpziln_c9_avg             1.678646  
+  mlpziln_cc                 1.679161  
+  weak_rs_a_cal              1.679170  CAL-LEAK
+  mlpbin_cb                  1.679282  
+  weak_rs_b_cal              1.679418  CAL-LEAK
+  mlpbin_d                   1.679595  
+  fusion_v3_fine1337         1.679612  
+  fusion_v3_s1337            1.679612  
+  fusion_v3ctl_s1337         1.679612  
+  mlpziln_c7                 1.680350  
+  mlpbin_b                   1.680363  
+  fusion_v3_fine42           1.681223  
+  mlpziln_d                  1.681349  
+  seq2tr_f_cal               1.681392  CAL-LEAK
+  mlpziln_cal_avg            1.681428  
+  fusion_v3_avg              1.681560  
+  mlpbin_c9_avg              1.681632  
+  weak_ft_counts_cal         1.681718  CAL-LEAK
+  mlpziln_ca                 1.681737  
+  mlp2_big                   1.682081  
+  mlpziln_c1337              1.682801  
+  mlpbin_cc                  1.682946  
+  weak_an_d                  1.683269  
+  mlpbin_ca                  1.684069  
+  wklin                      1.684188  
+  fusion_v3_e6_555           1.684636  
+  mlpziln_c42                1.684804  
+  mlp2_final                 1.684840  
+  fusion_f                   1.685104  
+  rankmodel_cal              1.685150  CAL-LEAK
+  pseudo_w06t                1.685185  
+  behavonly_avg_cal          1.685563  CAL-LEAK
+  pseudo_w04                 1.685567  
+  fusion_v3c555              1.685609  
+  wklin_base                 1.686242  
+  behavonly_cal              1.686534  CAL-LEAK
+  channel_avg                1.687155  
+  channel2                   1.687216  
+  channel3                   1.687376  
+  weak_ft_long90_cal         1.687572  CAL-LEAK
+  fusion_v3_s555             1.687732  
+  channel_s1337              1.688284  
+  fusion_v3_fine7            1.688906  
+  fusion_v3                  1.689871  
+  weak_rs_d                  1.690279  
+  weak_an_b                  1.690294  
+  weak_an_a                  1.690652  
+  fusion_v3ctl               1.691090  
+  c_ts2_s2024                1.691946  
+  c_ts2_s555                 1.692230  
+  c_ts2_avg                  1.692359  
+  c_ts2_s7                   1.692363  
+  twdeep                     1.692512  
+  gls_tw_pw-0.5              1.692633  
+  twl_v5s                    1.692635  
+  fusion_avg                 1.692869  
+  gls_tw_pw-1                1.693053  
+  fusion_v3c_avg             1.693128  
+  c_ts2_s42                  1.693138  
+  countaov_avg               1.693139  
+  twd_b1                     1.693286  
+  twl_v6                     1.693378  
+  weak_tiny_d                1.693486  
+  twl_v5                     1.693532  
+  twl_v7_avg                 1.693537  
+  twd_b3                     1.693543  
+  countaov                   1.693565  
+  countaov_s1337             1.693615  
+  twl_seqoof                 1.693647  
+  gls_tw_direct              1.693684  
+  countaov_s7                1.693744  
+  twl_v7_s1337               1.693765  
+  c_ts2_s1337                1.693996  
+  twd_b4                     1.694021  
+  twl_v10                    1.694074  
+  c_twlog_s42                1.694078  
+  c_twlog_s1337              1.694099  
+  twl_v7                     1.694155  
+  fusion_v3_s7               1.694373  
+  twl_v7_s7                  1.694413  
+  twd_b2                     1.694639  
+  twd_b5                     1.694640  
+  c_dirlgb_s42               1.694866  
+  c_dirlgb_s1337             1.695146  
+  gls_tw_pw1                 1.695501  
+  weak_tiny_b                1.696522  
+  pseudo_base                1.696564  
+  weak_an_c                  1.696565  
+  weak_tiny_a                1.696889  
+  weak_rs_c                  1.697660  
+  weak_ft_recency_cal        1.697701  CAL-LEAK
+  weak_tiny_c                1.697800  
+  c_xtw_s42                  1.697925  
+  gseq_small_s42_cal         1.698032  CAL-LEAK
+  fusion_v3c42               1.698175  
+  wklin_wk_cal               1.698418  CAL-LEAK
+  weak_rs_a                  1.698716  
+  gru_final                  1.698778  OLD-ERA
+  fusion_v3c7                1.700690  
+  weak_ft_counts             1.702208  
+  kostya46                   1.702375  
+  fusion_s7                  1.703699  
+  weak_rs_b                  1.706730  
+  seq2tr_f                   1.710203  
+  behavonly_s7               1.710653  
+  behavonly_avg              1.710680  
+  behavonly_s1337            1.711118  
+  behavonly                  1.712425  
+  gseq_small_s42             1.714382  
+  gseq_big_s42               1.716004  
+  weak_ft_long90             1.716552  
+  weak_ft_recency            1.729126  
+  wklin_wk                   1.731511  
+  lagd28                     1.744574  
+  hmmsim_cal                 1.760232  CAL-LEAK
+  rankmodel                  1.769641  
+  febspec2_cal               1.770665  CAL-LEAK
+  febspec3_avg_cal           1.771682  CAL-LEAK
+  febspec3_avg               1.771723  
+  febspec3_tw_cal            1.771914  CAL-LEAK
+  febspec3_mlp_cal           1.774166  CAL-LEAK
+  weak_ft_short14_cal        1.776373  CAL-LEAK
+  febspec2                   1.785259  
+  weak_ft_short14            1.788392  
+  febspec3_tw                1.795224  
+  febspec3_mlp               1.810473  
+  febspec_cal                1.810822  CAL-LEAK
+  short14_cal                1.819178  CAL-LEAK
+  hmmsim                     1.823787  
+  febspec                    1.826551  
+  short14                    1.828268  
+
+[current] fixed mix val RMSLE = 1.667432  (sum w = 1.000)
+[A_raw_clean] nnls_free   oof=1.667136 in=1.667018 gap=+0.000117 shape=1.667070 sumw=0.963 nnz=14
+[A_raw_clean] nnls_sum1   oof=1.667640 in=1.667539 gap=+0.000100 shape=1.667470 sumw=1.000 nnz=12
+[A_raw_clean] greedy      oof=1.668460 in=1.668460 gap=+0.000000 shape=1.668308 sumw=1.000 nnz=3
+[A_raw_clean] ridge_free  oof=1.667134 in=1.667019 gap=+0.000115 shape=1.667068 sumw=0.963 nnz=15
+[A_raw_clean] ridge_sum1  oof=1.667640 in=1.667539 gap=+0.000100 shape=1.667470 sumw=1.000 nnz=12
+[A_raw_clean] nnls_icpt   oof=1.666067 in=1.665934 gap=+0.000133 shape=1.666067 sumw=0.998 nnz=17
+[A_raw_clean] ridge_icpt  oof=1.666068 in=1.665935 gap=+0.000133 shape=1.666068 sumw=0.997 nnz=18
+[A_raw_clean] ols_free    oof=1.665490 in=1.664621 gap=+0.000869 shape=1.665489 sumw=0.947 nnz=129
+[A_raw_clean] ols_icpt    oof=1.665425 in=1.664550 gap=+0.000875 shape=1.665425 sumw=0.966 nnz=130
+[B_plus_cal] nnls_free   oof=1.665764 in=1.665647 gap=+0.000117 shape=1.665751 sumw=1.006 nnz=14
+[B_plus_cal] nnls_sum1   oof=1.665811 in=1.665683 gap=+0.000128 shape=1.665806 sumw=1.000 nnz=17
+[B_plus_cal] greedy      oof=1.666010 in=1.665896 gap=+0.000115 shape=1.666010 sumw=1.000 nnz=9
+[B_plus_cal] ridge_free  oof=1.665764 in=1.665647 gap=+0.000117 shape=1.665751 sumw=1.006 nnz=14
+[B_plus_cal] ridge_sum1  oof=1.665810 in=1.665685 gap=+0.000125 shape=1.665804 sumw=1.000 nnz=19
+[B_plus_cal] nnls_icpt   oof=1.665662 in=1.665525 gap=+0.000137 shape=1.665662 sumw=1.016 nnz=18
+[B_plus_cal] ridge_icpt  oof=1.665662 in=1.665525 gap=+0.000137 shape=1.665662 sumw=1.016 nnz=18
+[B_plus_cal] ols_free    oof=1.665339 in=1.663767 gap=+0.001572 shape=1.665339 sumw=1.043 nnz=210
+[B_plus_cal] ols_icpt    oof=1.665344 in=1.663765 gap=+0.001579 shape=1.665344 sumw=1.037 nnz=211
+[C_plus_oldera] nnls_free   oof=1.623216 in=1.623192 gap=+0.000024 shape=1.623082 sumw=1.003 nnz=2
+[C_plus_oldera] nnls_sum1   oof=1.623234 in=1.623213 gap=+0.000020 shape=1.623173 sumw=1.000 nnz=2
+[C_plus_oldera] greedy      oof=1.623281 in=1.623281 gap=+0.000000 shape=1.623222 sumw=1.000 nnz=2
+[C_plus_oldera] ridge_free  oof=1.623215 in=1.623192 gap=+0.000024 shape=1.623086 sumw=1.003 nnz=2
+[C_plus_oldera] ridge_sum1  oof=1.623233 in=1.623213 gap=+0.000019 shape=1.623173 sumw=1.000 nnz=2
+[C_plus_oldera] nnls_icpt   oof=1.622810 in=1.622784 gap=+0.000026 shape=1.622810 sumw=1.022 nnz=3
+[C_plus_oldera] ridge_icpt  oof=1.622809 in=1.622784 gap=+0.000025 shape=1.622809 sumw=1.021 nnz=3
+[C_plus_oldera] ols_free    oof=1.619587 in=1.618019 gap=+0.001568 shape=1.619587 sumw=1.074 nnz=214
+[C_plus_oldera] ols_icpt    oof=1.619592 in=1.618018 gap=+0.001573 shape=1.619592 sumw=1.077 nnz=215
+[D_literal_all] nnls_free   oof=1.623216 in=1.623192 gap=+0.000024 shape=1.623082 sumw=1.001 nnz=4
+[D_literal_all] nnls_sum1   oof=1.623216 in=1.623192 gap=+0.000024 shape=1.623082 sumw=1.000 nnz=4
+[D_literal_all] greedy      oof=1.623266 in=1.623266 gap=+0.000000 shape=1.623073 sumw=1.000 nnz=1
+[D_literal_all] ridge_free  oof=1.623215 in=1.623192 gap=+0.000024 shape=1.623084 sumw=1.000 nnz=4
+[D_literal_all] ridge_sum1  oof=1.623212 in=1.623192 gap=+0.000020 shape=1.623092 sumw=1.000 nnz=4
+[D_literal_all] nnls_icpt   oof=1.622810 in=1.622784 gap=+0.000026 shape=1.622810 sumw=1.019 nnz=5
+[D_literal_all] ridge_icpt  oof=1.622809 in=1.622784 gap=+0.000025 shape=1.622809 sumw=1.019 nnz=5
+[D_literal_all] ols_free    oof=1.619576 in=1.618003 gap=+0.001573 shape=1.619576 sumw=1.071 nnz=226
+[D_literal_all] ols_icpt    oof=1.619580 in=1.618002 gap=+0.001578 shape=1.619580 sumw=1.075 nnz=227
+
+[current-4 refit sum1] in=1.667428 oof=1.667450 w={'c_xtw_s42': np.float64(0.0344), 'gru_final': np.float64(0.1528), 'mlpbin_cal': np.float64(0.2357), 'mlpziln_cal': np.float64(0.5771)}
+
+[summary] best OOF per library: {'A_raw_clean': ('ols_icpt', 1.6654250487690299), 'B_plus_cal': ('ols_free', 1.6653390858362909), 'C_plus_oldera': ('ols_free', 1.6195866024097625), 'D_literal_all': ('ols_free', 1.619576086842796)}
+
+[winner] lib=B_plus_cal method=nnls_free alpha_rel=0.0 oof=1.665764
+  boot 10/50  (237s)
+  boot 20/50  (240s)
+  boot 30/50  (242s)
+  boot 40/50  (245s)
+  boot 50/50  (247s)
+
+[bootstrap] model / w_full / w_mean+-std / sel_freq
+  kostya46_cal               0.2460  0.2434+-0.0288  1.00
+  fusion_v3c_avg_cal         0.2289  0.2207+-0.0588  1.00
+  gseq_small_s42_cal         0.1087  0.1052+-0.0102  1.00
+  fusion_v3ctl_cal           0.1061  0.0877+-0.0546  0.94
+  wklin                      0.0710  0.0716+-0.0160  1.00
+  behavonly_avg_cal          0.0414  0.0413+-0.0244  0.92
+  weak_ft_recency_cal        0.0434  0.0413+-0.0162  0.98
+  lagd28                     0.0350  0.0330+-0.0091  1.00
+  weak_an_d_cal              0.0455  0.0325+-0.0278  0.78
+  gseq_big_s42_cal           0.0244  0.0274+-0.0197  0.84
+  fusion_f_cal               0.0106  0.0213+-0.0318  0.46
+  c_ts2_s7_cal               0.0000  0.0184+-0.0289  0.40
+  c_ts2_s42_cal              0.0333  0.0172+-0.0239  0.46
+  mlpziln_cal_avg_cal        0.0000  0.0109+-0.0205  0.32
+  febspec2_cal               0.0089  0.0098+-0.0062  0.76
+  fusion_v3_cal              0.0000  0.0057+-0.0150  0.18
+  wklin_wk_cal               0.0028  0.0034+-0.0059  0.26
+  fusion_avg_cal             0.0000  0.0031+-0.0130  0.06
+  hmmsim_cal                 0.0000  0.0026+-0.0044  0.22
+  c_ts2_s555_cal             0.0000  0.0025+-0.0096  0.08
+  behavonly_cal              0.0000  0.0019+-0.0089  0.04
+  hmmsim                     0.0000  0.0017+-0.0031  0.14
+  wklin_wk                   0.0000  0.0016+-0.0032  0.12
+  twl_v7_cal                 0.0000  0.0006+-0.0044  0.02
+  weak_ft_counts_cal         0.0000  0.0003+-0.0012  0.02
+  c_ts2_s2024_cal            0.0000  0.0003+-0.0020  0.02
+  mlpziln_big_cal            0.0000  0.0002+-0.0015  0.02
+  twl_v5_cal                 0.0000  0.0002+-0.0013  0.02
+
+[levels] {"new_val_meanlog": 2.24872, "new_test_meanlog": 2.1419, "cur_val_meanlog": 2.26286, "cur_test_meanlog": 2.18754, "delta_test_meanlog_new_minus_cur": -0.04564, "corr_test_new_cur": 0.99893, "corr_val_err": 0.99916, "cur_val_shape": 1.6673, "new_val_shape": 1.66563, "cur_val_bias": 0.02076, "new_val_bias": 0.00662, "test_sd_new": 1.50959, "test_sd_cur": 1.54367}
+[SCORE] blend_opt: 1.665647 (re-optimised blend: lib=B_plus_cal(210) method=nnls_free alpha_rel=0.0; OOF(5f by user)=1.665764; current mix val 1.667432; w={'kostya46_cal': 0.246, 'fusion_v3c_avg_cal': 0.2289, 'gseq_small_s42_cal': 0.1087, 'fusion_v3ctl_cal': 0.1061, 'wklin': 0.071, 'weak_an_d_cal': 0.0455, 'weak_ft_recency_cal': 0.0434, 'behavonly_avg_cal': 0.0414, 'lagd28': 0.035, 'c_ts2_s42_cal': 0.0333, 'gseq_big_s42_cal': 0.0244, 'fusion_f_cal': 0.0106, 'febspec2_cal': 0.0089, 'wklin_wk_cal': 0.0028})
+
+JSON written to work/reports/blend_reopt_2026-08-21.json (248s)
