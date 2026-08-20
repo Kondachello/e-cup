@@ -129,6 +129,7 @@ from calibrate import apply_shifts, fit_shifts  # noqa: E402
 from common import (REPORTS_DIR, TEST_ANCHOR, VAL_ANCHOR, WORK,  # noqa: E402
                     feature_cols, load_anchor, rmsle, user_universe)
 from exp_lib import log_score, save_preds  # noqa: E402
+from model_io import save_torch  # noqa: E402
 
 SEQ_DIR = WORK / "seq3"
 MODELS_DIR = WORK / "models"
@@ -755,6 +756,15 @@ def main():
         val_pred_sum = pred_raw if val_pred_sum is None else val_pred_sum + pred_raw
         print(f"[p1 seed {seed}] val_rmsle {r:.5f} best_step {best_step} "
               f"steps_done {steps_done}", flush=True)
+        if not args.smoke:
+            # воспроизводимость: без сохранённых весов val-parquet невосстановим из
+            # чистого клона («прогноз-артефакт», ~0.4 веса бленда). Сохраняются ровно
+            # те состояния, из которых собран прогноз: при ckpt-avg — каждая точка.
+            if ckpt_buf and args.ckpt_avg and not args.swa:
+                for c in sel:
+                    save_torch(name, c["state"], seed, tag=f"p1k{int(c['step'])}")
+            else:
+                save_torch(name, model, seed, tag="p1")
         del model, ckpt_buf
     ens_val = val_pred_sum / len(seeds)
     ens_rmsle = rmsle(val_y30_raw[val_idx], ens_val)
@@ -877,6 +887,12 @@ def main():
             t_raw = np.expm1(np.clip(t_log, 0, None)).astype(np.float64)
             test_sum = t_raw if test_sum is None else test_sum + t_raw
             print(f"[p2 seed {seed}] steps {steps2} test mean {t_raw.mean():.2f}", flush=True)
+            # воспроизводимость: тестовый предикт делают именно эти веса
+            if buf2 and not args.swa:
+                for c in sel2:
+                    save_torch(name, c["state"], seed, tag=f"p2k{int(c['step'])}")
+            else:
+                save_torch(name, model2, seed, tag="p2")
             del model2, buf2
         ens_test = test_sum / len(seeds)
         save_preds(name, "test", uids, ens_test)
