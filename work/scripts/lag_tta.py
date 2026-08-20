@@ -45,6 +45,20 @@ MIXES = {"lagmix_a": {"lag0": 0.5, "lag14": 0.5},
          "lagmix_b": {"lag0": 0.6, "lag14": 0.25, "lag28": 0.15}}
 
 
+def champion_anchors(cut: date) -> list[date]:
+    """Обучающие якоря чемпионского набора признаков не позже cut.
+
+    Февральские якоря собраны без extra-тира (они нужны только год-назад окну
+    febspec): чемпионские колонки на них не собираются, load_matrix падает на select.
+    """
+    anchors = [a for a in available_train_anchors() if a <= cut]
+    if os.environ.get("USE_V2"):
+        from common import FEATURES_DIR
+        anchors = [a for a in anchors
+                   if (FEATURES_DIR / f"anchor={a.isoformat()}.extra.parquet").exists()]
+    return anchors
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lags", type=str, default="0,14,28",
@@ -81,13 +95,7 @@ def main():
     # booster has memorised those exact rows and the "prediction" is partly recall of that
     # anchor's own target. So training stops before the deepest vintage we intend to score.
     gap_cut = min([VAL_ANCHOR - timedelta(days=30)] + [a - timedelta(days=1) for a in stale.values()])
-    tr_anchors = [a for a in available_train_anchors() if a <= gap_cut]
-    # февральские якоря собраны без extra-тира (они нужны только год-назад окну febspec):
-    # чемпионский набор признаков на них не собирается, load_matrix падает на select
-    if os.environ.get("USE_V2"):
-        from common import FEATURES_DIR
-        tr_anchors = [a for a in tr_anchors
-                      if (FEATURES_DIR / f"anchor={a.isoformat()}.extra.parquet").exists()]
+    tr_anchors = champion_anchors(gap_cut)
     print(f"deepest vintage {min(stale.values()) if stale else VAL_ANCHOR} "
           f"-> train cutoff {gap_cut}", flush=True)
     print(f"train anchors (gap30): {[a.isoformat() for a in tr_anchors]}", flush=True)
@@ -189,7 +197,7 @@ def emit_test(args, cols, uid_val, val_iter):
 
     vintage = date.fromisoformat(args.test_vintage)
     cut = vintage - timedelta(days=1)
-    anchors = [a for a in available_train_anchors() if a <= cut]
+    anchors = champion_anchors(cut)
     print(f"\ntest: винтаж {vintage} ({(TEST_ANCHOR - vintage).days}д застоялости), "
           f"обучение до {cut}, якорей {len(anchors)}", flush=True)
 

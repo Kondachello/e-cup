@@ -78,6 +78,13 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--json", default="library_sweep.json",
                     help="имя json-артефакта в work/reports (прошлый прогон не оставил ничего)")
+    ap.add_argument("--whitelist", default="pack", choices=["pack", "all"],
+                    help="pack: только колонки пакета + --include (провенанс проверен). all: весь "
+                         "зоопарк work/preds — ТОЛЬКО диагностика: там лежит pre-gap эпоха, чьи "
+                         "остатки знают валидацию, и никакой скоровый порог это не ловит "
+                         "(замерено 21.08: зоопарковый пол +0.0005 против честного +0.00003)")
+    ap.add_argument("--include", default="",
+                    help="доп. имена через запятую поверх пакета (свежие кандидаты: lagd28,...)")
     args = ap.parse_args()
 
     pack = pl.read_parquet(args.pack / "val_preds.parquet").sort("user_id")
@@ -98,17 +105,27 @@ def main():
             gs.append(score(lb[~m], ly[~m]) - score(A[~m] @ w, ly[~m]))
         return float(np.mean(gs))
 
+    allowed: set[str] | None = None
+    if args.whitelist == "pack":
+        allowed = set(pack.columns) - {"user_id", "target", "blend"}
+        allowed |= {n for n in args.include.split(",") if n}
+        print(f"белый список: {len(allowed)} имён (колонки пакета + include)")
+
     names, cols = [], []
     excluded: dict[str, str] = {}
     for f in sorted(PREDS_DIR.glob("*_val.parquet")):
         n = f.name[: -len("_val.parquet")]
-        if n in BLACKLIST or n.startswith(BLEND_PREFIXES):
-            excluded[n] = "чёрный список (pre-gap / стек / производная бленда)"
-            continue
-        if n.endswith("_cal") and (PREDS_DIR / f"{n[:-4]}_val.parquet").exists():
-            # свип калибрует сам; _cal при живом базовом файле — коллинеарный дубль
-            excluded[n] = "производная _cal при живом базовом файле"
-            continue
+        if allowed is not None:
+            if n not in allowed:
+                continue                      # зоопарк молча мимо: провенанс не проверен
+        else:
+            if n in BLACKLIST or n.startswith(BLEND_PREFIXES):
+                excluded[n] = "чёрный список (pre-gap / стек / производная бленда)"
+                continue
+            if n.endswith("_cal") and (PREDS_DIR / f"{n[:-4]}_val.parquet").exists():
+                # свип калибрует сам; _cal при живом базовом файле — коллинеарный дубль
+                excluded[n] = "производная _cal при живом базовом файле"
+                continue
         d = pl.read_parquet(f).sort("user_id")
         if "pred" not in d.columns:
             excluded[n] = "нет колонки pred (служебный файл)"
