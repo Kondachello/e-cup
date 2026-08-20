@@ -22,3 +22,10 @@ __pycache__/
 work/reports/*.log
 work/reports/queue_runner.out
 baseline-seacrh-ltv.ipynb
+
+
+# перенос между машинами и логи прогонов (трек №5)
+from_gpu/
+_to_kosta/
+runlogs/
+COMMIT_MSG.txt
