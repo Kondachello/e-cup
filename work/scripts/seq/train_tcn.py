@@ -288,7 +288,19 @@ def rmsle_from_log(pred_log, true_log):
 def main(a, st=None):
     global VAL_ANCHOR, MAX_TR_ANCHOR
     VAL_ANCHOR = a.val_anchor
-    MAX_TR_ANCHOR = VAL_ANCHOR - HORIZON      # зазор: таргет обучения не залезает в валидацию
+    # По умолчанию зазор 30 дней: таргет обучения не залезает в валидацию.
+    # --max-tr-anchor отвязывает границу — нужно для переобучения на train+val
+    # перед предсказанием теста (контракт exp_lib). Зазор при этом нарушается
+    # СОЗНАТЕЛЬНО, поэтому такой прогон обязан идти с --fixed-steps: валидационная
+    # метрика там подсматривает и ранней остановке доверять нельзя.
+    MAX_TR_ANCHOR = a.max_tr_anchor if a.max_tr_anchor else VAL_ANCHOR - HORIZON
+    _gap = VAL_ANCHOR - MAX_TR_ANCHOR
+    if _gap < HORIZON:
+        print(f'ВНИМАНИЕ: зазор {_gap} дней вместо {HORIZON} — валидационный скор '
+              f'завышен и для сравнения моделей НЕ ГОДИТСЯ', flush=True)
+        if not a.fixed_steps:
+            raise SystemExit('при нарушенном зазоре обязателен --fixed-steps N '
+                             '(число шагов берите из парного прогона с зазором)')
     torch.manual_seed(a.seed); np.random.seed(a.seed)
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
     torch.backends.cudnn.benchmark = True
@@ -314,6 +326,9 @@ def main(a, st=None):
 
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, a.lr, total_steps=a.steps, pct_start=max(a.pct_start,1e-3))
     ema = EMA(model, a.ema)
+    if a.fixed_steps:
+        a.steps, a.minutes = a.fixed_steps, 0.0
+        print(f'режим переобучения: ровно {a.fixed_steps} шагов, ранней остановки нет', flush=True)
     t0 = time.time(); best = (9e9, None); step = 0; retimed = False
     hist = []   # (шаг, лосс, val RMSLE, lr, минуты)
     if a.eval_only:
@@ -367,11 +382,17 @@ def main(a, st=None):
                   f'{el/60:.1f} мин  ({step/el:.1f} шаг/с, простой на данных '
                   f'{100*t_wait/el:.0f}%)', flush=True)
             hist.append((step, float(loss.item()), r, float(opt.param_groups[0]['lr']), el/60))
-            if r < best[0]:
+            if a.fixed_steps:
+                best = (r, step)          # чекпоинт пишется один раз, после цикла
+            elif r < best[0]:
                 best = (r, step); torch.save(ema.model.state_dict(), a.ckpt)
             if a.minutes and el > a.minutes*60:
                 print('лимит времени'); break
-    if not a.eval_only: print(f'ЛУЧШЕЕ val RMSLE {best[0]:.4f} на шаге {best[1]}')
+    if a.fixed_steps and not a.eval_only:
+        torch.save(ema.model.state_dict(), a.ckpt)
+        print(f'сохранены веса EMA на шаге {step} (переобучение, без отбора)')
+    elif not a.eval_only:
+        print(f'ЛУЧШЕЕ val RMSLE {best[0]:.4f} на шаге {best[1]}')
 
     model.load_state_dict(torch.load(a.ckpt, map_location=dev)); model.eval()
     preds=[]; trues=[]
@@ -381,11 +402,16 @@ def main(a, st=None):
             preds.append(model(xb)['y30'].float().cpu()); trues.append(yb['y30'].float().cpu())
     lp, lt = torch.cat(preds), torch.cat(trues)
     np.save(f'val_logpred_{a.tag}.npy', lp.numpy()); np.save(f'val_logtrue_{a.tag}.npy', lt.numpy())
-    cal = a.calib; bestc = (9e9, 1.0)
-    for c in [1.0,0.97,0.95,0.93,0.9,0.87,0.85]:
-        r = rmsle_from_log(c*lp, lt); bestc = min(bestc, (r, c))
-        print(f'  усадка {c}: {r:.4f}')
-    cal = bestc[1]; print(f'выбрана усадка {cal} -> val RMSLE {bestc[0]:.4f}')
+    if a.cal_fixed:
+        # при нарушенном зазоре валидация подсматривает, подбирать усадку на ней нельзя
+        cal = a.cal_fixed
+        print(f'усадка задана флагом: {cal} (подбор на валидации отключён)')
+    else:
+        cal = a.calib; bestc = (9e9, 1.0)
+        for c in [1.0, 0.97, 0.95, 0.93, 0.9, 0.87, 0.85]:
+            r = rmsle_from_log(c*lp, lt); bestc = min(bestc, (r, c))
+            print(f'  усадка {c}: {r:.4f}')
+        cal = bestc[1]; print(f'выбрана усадка {cal} -> val RMSLE {bestc[0]:.4f}')
     if a.export:
         import polars as _pl, os as _os
         _os.makedirs(a.export, exist_ok=True)
@@ -454,6 +480,15 @@ if __name__ == '__main__':
                    help='по чему выбирать чекпоинт: cal = после биновой калибровки')
     p.add_argument('--cohort1', action='store_true',
                    help='старый фильтр: активность в одном блоке вместо трёх')
+    p.add_argument('--max-tr-anchor', type=int, default=0,
+                   help='верхняя граница обучающих якорей; 0 = val_anchor-30 (зазор). '
+                        'Ставьте 378 для переобучения на train+val перед тестом; '
+                        'требует --fixed-steps')
+    p.add_argument('--fixed-steps', type=int, default=0,
+                   help='обучать ровно столько шагов, без ранней остановки; '
+                        'число берите из парного прогона с зазором')
+    p.add_argument('--cal-fixed', type=float, default=0.0,
+                   help='усадка из парного прогона с зазором; 0 = подбирать на валидации')
     p.add_argument('--no-plots', action='store_true')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--tag', default='', help='метка прогона: имена чекпоинта и val-файлов')
