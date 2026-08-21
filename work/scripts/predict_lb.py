@@ -73,6 +73,9 @@ MEASURED: list[tuple[str, str, float]] = [
     ("V1_tfm3b_pre",     "V1_tfm3b_pre.csv",               1.647284324),
     ("V2_tfm3b_opt",     "V2_tfm3b_opt.csv",               1.6472259177),
     ("V3_canon",         "V3_canon.csv",                   1.6472249545),
+    # паблик-арбитраж (подгонка под 50k, НЕ финалисты, на приват не переносятся)
+    ("SHOW_maxpub",      "SHOW_maxpub.csv",                1.6463720678),
+    ("SHOW2_aggr",       "SHOW2_aggr.csv",                 1.6463725981),
 
 ]
 
