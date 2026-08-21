@@ -176,16 +176,22 @@ class Transformer(nn.Module):
                                            batch_first=True, norm_first=True)
         self.enc = nn.TransformerEncoder(layer, n_layers, enable_nested_tensor=False)
         self.neck = Neck(ch, drop)
-    def forward(self, x):                                  # x: [B, C, L]
+    def tokenize(self, x):                                 # x: [B, C, L] -> [B, T, C]
         cut = self.n_old * self.OLD_W
         old = x[:, :, -SEQ_LEN:-self.RECENT][:, :, -cut:]
         old = old.reshape(x.shape[0], x.shape[1], self.n_old, self.OLD_W).mean(-1)
-        tok = torch.cat([old, x[:, :, -self.RECENT:]], -1).transpose(1, 2)
+        return torch.cat([old, x[:, :, -self.RECENT:]], -1).transpose(1, 2)
+
+    def embed(self, tok):                                  # [B, T, C] -> [B, T, ch]
         h = self.proj(tok) + self.pos
-        h = h + torch.cat([self.res[:, :1].expand(-1, self.n_old, -1),
-                           self.res[:, 1:].expand(-1, self.RECENT, -1)], 1)
-        h = self.enc(h).transpose(1, 2)                     # [B, ch, T]
-        return self.neck(h)
+        return h + torch.cat([self.res[:, :1].expand(-1, self.n_old, -1),
+                              self.res[:, 1:].expand(-1, self.RECENT, -1)], 1)
+
+    def encode(self, x):                                   # [B, C, L] -> [B, ch, T]
+        return self.enc(self.embed(self.tokenize(x))).transpose(1, 2)
+
+    def forward(self, x):
+        return self.neck(self.encode(x))
 
 def build_model(arch, n_in, a):
     if arch == 'tcn':         return TCN(n_in, a.channels, a.blocks, a.dropout)
@@ -309,6 +315,18 @@ def main(a, st=None):
         st = Store(a.data, pin=(dev=='cuda'), abs_time=a.abs_time, cohort3=not a.cohort1); st.to_device(dev)
     model = build_model(a.arch, st.n_in, a).to(dev)
     print('архитектура:', a.arch, flush=True)
+    if a.init_from:
+        # Веса ствола из самообучения. Голова (neck) не переносится: она под задачу.
+        sd = torch.load(a.init_from, map_location=dev)
+        own = model.state_dict()
+        take = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
+        skip = [k for k in sd if k not in take]
+        model.load_state_dict(take, strict=False)
+        print(f'инициализация из {a.init_from}: перенесено {len(take)} тензоров'
+              + (f', пропущено {len(skip)}' if skip else ''), flush=True)
+        if not take:
+            raise SystemExit('из чекпойнта предобучения не перенеслось НИ ОДНОГО тензора — '
+                             'скорее всего не совпала архитектура')
     if dev == 'cuda': model = model.to(memory_format=torch.contiguous_format)
     print('параметров:', sum(p.numel() for p in model.parameters())/1e6, 'млн', flush=True)
 
@@ -503,6 +521,8 @@ if __name__ == '__main__':
                         'число берите из парного прогона с зазором')
     p.add_argument('--cal-fixed', type=float, default=0.0,
                    help='усадка из парного прогона с зазором; 0 = подбирать на валидации')
+    p.add_argument('--init-from', default='',
+                   help='чекпойнт самообучения: перенести веса ствола перед дообучением')
     p.add_argument('--test-anchor', type=int, default=0,
                    help='якорь для --predict; 0 = 408 (2026-02-13). Поставьте 380 для '
                         'инференса с застоялостью 28 дней')
