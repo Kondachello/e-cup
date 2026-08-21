@@ -266,7 +266,11 @@ def window_hazards(panel: Panel, haz, anchor_idx: int, horizon: int, threads: in
             d = anchor_idx + 1 + t
             # recency the "no order yet" chain would have, or the grid value after an order
             # grid slot REC_CAP carries the "no order yet in the window" chain
-            rec = np.minimum(base_rec + t, REC_CAP) if r == REC_CAP else np.full(U, r + t, np.float32)
+            # BUGFIX 22.08: non-cap slots must be evaluated AT the grid value. head_mc
+            # re-picks the slot every day from its own `since` clock (line ~305), so the
+            # old `r + t` double-counted elapsed days: after an in-window order the hazard
+            # was read at recency r + day-number (up to +29), understating repeat orders.
+            rec = np.minimum(base_rec + t, REC_CAP) if r == REC_CAP else np.full(U, r, np.float32)
             f = panel.features(anchor_idx + 1, d_cal=d, rec_ord=np.minimum(rec, REC_CAP))
             out[j, t] = haz.predict_proba(f, num_threads=threads)[:, 1]
     return out, base_rec
