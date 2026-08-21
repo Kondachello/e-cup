@@ -1,8 +1,18 @@
 """Correlation of a model's validation errors with the current blend's errors.
 
-The project's bottleneck is model uniformity, not model quality: anything with
-error correlation below ~0.97 is valuable even if its own RMSLE is much worse.
-This is the acceptance metric for every new model.
+NOT an acceptance criterion, despite what this docstring said until 2026-08-21.
+For any model inside the blend's linear hull the correlation is identically
+sb/sm: it is fixed by the model's own score and carries no information about
+dissimilarity (the identity is verified to five decimals on 101 models). The old
+rule "error correlation below ~0.97 is valuable" was empty, and the team worked
+by it for a week.
+
+Acceptance is decided by ЗАПАС = sb/sm - corr, the share of the model outside the
+hull. `margin.py` prints it together with the exact contribution algebra, and a
+SET of candidates is measured only by `joint_gain.py`, because margins do not
+add up (lagd28 and hz_v1_surv are each worthless alone, +0.000135 together).
+This tool remains useful for the diagnostic pair - measured correlation against
+the identity it must equal - and for the honest two-way weight w*.
 
 Usage:
   python work/scripts/err_corr.py NAME [NAME2 ...]
@@ -33,6 +43,11 @@ BLEND = {"fusion_f_cal": 0.32, "c_ts2_s42_cal": 0.25, "mlpziln_cal": 0.12,
          "behavonly_cal": 0.08, "countaov_cal": 0.07, "seq2tr_f_cal": 0.07,
          "twl_v7_cal": 0.055, "hmmsim_cal": 0.028, "channel2_cal": 0.012}
 
+# Какой эталон реально взят в этом запуске. Раньше в JSON всегда уходил словарь
+# BLEND, даже когда счёт шёл по колонке пакета, — записанный отчёт приписывал
+# числа весам, которых в расчёте не было.
+BLEND_SOURCE = "hardcoded"
+
 
 def load_lp(path: Path, uid_ref: np.ndarray) -> np.ndarray:
     df = pl.read_parquet(path).sort("user_id")
@@ -49,10 +64,12 @@ def blend_lp(uid_ref: np.ndarray) -> np.ndarray:
     EVERY candidate by about +0.00019 - 8 noise units, enough to accept a dead model.
     The pack column tracks the live blend; the hardcoded dict goes stale by construction.
     """
+    global BLEND_SOURCE
     pack = ROOT / "work" / "preds_pack" / "val_preds.parquet"
     if pack.exists():
         df = pl.read_parquet(pack).sort("user_id")
         if "blend" in df.columns and np.array_equal(df["user_id"].to_numpy(), uid_ref):
+            BLEND_SOURCE = "pack"
             return df["blend"].to_numpy().astype(np.float64)      # already log1p
         print("ВНИМАНИЕ: пакет есть, но колонка blend не подошла — беру старые веса")
     else:
@@ -80,7 +97,8 @@ def main():
     lb = blend_lp(uid)
     eb = lb - ly
     blend_rmsle = float(np.sqrt(np.mean(eb ** 2)))
-    out["blend"] = {"rmsle": blend_rmsle, "n": int(len(y)), "weights": BLEND}
+    out["blend"] = {"rmsle": blend_rmsle, "n": int(len(y)), "source": BLEND_SOURCE,
+                    "weights": BLEND if BLEND_SOURCE == "hardcoded" else None}
     print(f"blend val_rmsle={blend_rmsle:.6f}  n={len(y)}", flush=True)
 
     targets = [(n, PREDS_DIR / f"{n}_val.parquet") for n in args.names]

@@ -36,7 +36,21 @@ import polars as pl
 
 BINS = 24
 ERRCORR_BLEND_RMSLE = 1.666718   # из докстринга err_corr.py, для справки
-PROJECT_RECORD = 0.00193
+PROJECT_RECORD = 0.00307   # lagd28, ось застоялости входа. Прежние 0.00193 (febspec2)
+                           # мерились против более слабого бленда прошлой эпохи.
+
+
+def exact_contrib(sb: float, sm: float, margin: float) -> float:
+    """Точная алгебра пары вместо похороненного правила 7.1*запас**2.
+
+    Старое правило объясняло 9% разброса и занижало сильные модели в 15-20 раз:
+    по нему браковалась kostya46 (запас 0.00137, реальный вклад 0.000226) -
+    крупнейший член действующего бленда. Отрицательный запас означает beta >= 1,
+    то есть нулевой вес у оптимизатора, поэтому пол не косметический.
+    """
+    z = max(margin, 0.0)
+    den = (sm * sm - sb * sb + 2.0 * sb * sm * z) * 2.0 * sb
+    return (sb * sb * sm * sm * z * z) / den if den > 1e-12 else 0.0
 
 
 def find_root(explicit: str | None) -> Path:
@@ -156,12 +170,17 @@ def main() -> int:
     for label, v in (("сырой", lp), ("калиброванный", lpc)):
         sm = rmsle_log(v, ly)
         e = v - ly
-        rho = float(np.corrcoef(e, eb)[0, 1])
+        # НЕцентрированная корреляция: тождество ЗАПАС = sb/sm - rho выполняется
+        # для E[e*eb]/(sm*sb), а не для corrcoef. Центрирование искажало 6 моделей
+        # из 30 - ровно все некалиброванные (ненулевое среднее ошибки). Строка
+        # "сырой" ниже как раз некалиброванная, то есть страдала именно она.
+        rho = float(np.mean(e * eb) / max(sm * sb, 1e-12))
         ident = sb / max(sm, 1e-12)
         margin = ident - rho
-        print(f"  {label:20} {sm:10.6f} {rho:10.5f} {ident:11.6f} {margin:+10.5f} {7.1 * margin ** 2:10.6f}")
+        contrib = exact_contrib(sb, sm, margin)
+        print(f"  {label:20} {sm:10.6f} {rho:10.5f} {ident:11.6f} {margin:+10.5f} {contrib:10.6f}")
         out[label] = {"rmsle": sm, "err_corr": rho, "corr_expected": ident,
-                      "margin": margin, "contrib_est": 7.1 * margin ** 2}
+                      "margin": margin, "contrib_est": contrib}
 
     m = out["калиброванный"]["margin"]
     print(f"\nрекорд проекта по запасу {PROJECT_RECORD}: "
@@ -170,10 +189,11 @@ def main() -> int:
     # --- поправка на разницу эталонов ---------------------------------------
     sm_cal = out["калиброванный"]["rmsle"]
     shift = (ERRCORR_BLEND_RMSLE - sb) / sm_cal
-    print(f"\nесли считать против захардкоженного бленда err_corr.py ({ERRCORR_BLEND_RMSLE}),")
-    print(f"ЗАПАС механически вырастет примерно на {shift:+.5f} -> около {m + shift:+.5f}.")
-    print("Это разница ЭТАЛОНОВ, а не качества модели: тот бленд на 0.000323 слабее")
-    print("действующего blend_opt. Число против действующего честнее.")
+    print(f"\nсправочно: против ЗАХАРДКОЖЕННОГО девятичленного бленда ({ERRCORR_BLEND_RMSLE})")
+    print(f"ЗАПАС был бы выше примерно на {shift:+.5f} -> около {m + shift:+.5f}.")
+    print("Это разница ЭТАЛОНОВ, а не качества модели. Нужно это теперь только чтобы")
+    print("сверяться с числами из СТАРЫХ отчётов: с 21.08 err_corr.py сам читает колонку")
+    print("blend из пакета, так что оба инструмента считают против одного эталона.")
     out["errcorr_reference_shift_est"] = shift
 
     if a.json:

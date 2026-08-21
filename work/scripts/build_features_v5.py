@@ -2,7 +2,9 @@
 
 Why this tier exists
 --------------------
-Measured identity: a model's contribution to the blend is ~7.1*delta^2, where delta is the
+Measured identity (the CONSTANT is dead - buried 20-21.08, use margin.py's exact algebra;
+the identity for delta itself still holds):
+a model's contribution to the blend is ~7.1*delta^2, where delta is the
 share of the model OUTSIDE the blend's linear hull, and the blend residual is NOT predictable
 from our 203 aggregate features. Only a representation that is not a function of that feature
 set can help. Screening found exactly one: the low-rank structure of the user x week matrix

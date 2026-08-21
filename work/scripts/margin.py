@@ -13,7 +13,7 @@ pair algebra the contribution of a strong model (sm/sb -> 1) is almost LINEAR in
 so the margin needed for +0.0003 depends on the score: 1.67 -> 0.00166, 1.70 -> 0.00412,
 1.83 -> 0.00811. Sets are still measured by joint_gain.py - margins do not add up.
 
-Reference points: record margin over the whole project 0.00193; leaderboard measurement
+Reference points: record margin over the whole project 0.00307 (lagd28); leaderboard measurement
 noise is 0.000022.
 
 Everything is measured on CALIBRATED predictions, because the raw score misled the team
@@ -41,7 +41,9 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from common import PREDS_DIR, ROOT
 
-RECORD = 0.00193      # best margin ever measured in the project
+RECORD = 0.00307      # best margin ever measured in the project (lagd28, stale-input axis).
+                      # The previous 0.00193 (febspec2) was measured against an older, weaker
+                      # blend; against the current pack column the same lagd28 reads +0.00277.
 NOISE = 0.000022      # leaderboard measurement noise, one unit
 THRESHOLD = 0.0003    # gain the team calls meaningful
 
