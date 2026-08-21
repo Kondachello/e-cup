@@ -64,6 +64,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*", help="model names -> work/preds/NAME_val.parquet")
     ap.add_argument("--file", action="append", default=[], help="explicit parquet path(s)")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="calibrate inside (cross-fit binned log-shifts) instead of "
+                         "requiring a pre-calibrated _cal input")
     ap.add_argument("--json", type=str, default="",
                     help="also write the table as JSON (blend score + one row per model)")
     args = ap.parse_args()
@@ -87,6 +90,17 @@ def main():
             print(f"{name}: MISSING {path}")
             continue
         lp = load_lp(path, uid)
+        if args.calibrate:
+            from margin import calibrate_honest
+            lp = calibrate_honest(lp, ly, 24, 0)
+        elif not name.endswith("_cal"):
+            # Rule 1 of the team protocol: models may only be compared AFTER calibration -
+            # the raw ordering misled us eight times. This tool does not calibrate, so a raw
+            # name silently produces the wrong number: kostya46 reads 1.7024 raw against
+            # 1.6699 calibrated, and its margin +0.00083 against +0.00133. Warn, do not guess.
+            print(f"  ВНИМАНИЕ: {name} не похож на калиброванный (_cal). Числа ниже — по сырым "
+                  f"предсказаниям, сравнивать их с калиброванными НЕЛЬЗЯ. "
+                  f"Либо calibrate.py, либо флаг --calibrate.", flush=True)
         e = lp - ly
         sm = float(np.sqrt(np.mean(e ** 2)))
         # UNcentered correlation: the identity margin = sb/sm - c holds for E[e*eb]/(sm*sb).

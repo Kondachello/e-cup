@@ -60,6 +60,37 @@ def fit_shifts(lp: np.ndarray, ly: np.ndarray, bins: int):
     return np.array(centers), np.array(shifts)
 
 
+def apply_shifts(lp: np.ndarray, centers: np.ndarray, shifts: np.ndarray) -> np.ndarray:
+    return np.clip(lp + np.interp(lp, centers, shifts), 0, None)
+
+
+def calibrate_split(lp: np.ndarray, ly: np.ndarray, fit_mask: np.ndarray,
+                    bins: int = 24) -> np.ndarray:
+    """Shifts fitted ONLY on fit_mask, applied everywhere.
+
+    calibrate_honest cross-fits over the whole population, which is right when the whole
+    population is what gets scored. It is WRONG when a later step splits the users again:
+    the rows used for model selection then carry shifts fitted with the held-out rows'
+    targets, so the held-out set stops being held out. Sasha caught this in library_sweep
+    and joint_gain, where the calibration seed and the DEV/EVAL seed were the same integer
+    and therefore produced bit-identical halves. Here the shifts are a parameter learned on
+    the fit side and applied to the other side, like any other parameter.
+    """
+    c, sh = fit_shifts(lp[fit_mask], ly[fit_mask], bins)
+    out = np.empty_like(lp)
+    out[~fit_mask] = apply_shifts(lp[~fit_mask], c, sh)
+    # inside the fit side, cross-fit so those rows are not calibrated on themselves
+    sub = fit_mask.copy()
+    idx = np.flatnonzero(fit_mask)
+    half = np.zeros(len(lp), bool)
+    half[idx[: len(idx) // 2]] = True
+    for m in (half & sub, (~half) & sub):
+        o = sub & ~m
+        c2, sh2 = fit_shifts(lp[o], ly[o], bins)
+        out[m] = apply_shifts(lp[m], c2, sh2)
+    return out
+
+
 def calibrate_honest(lp: np.ndarray, ly: np.ndarray, bins: int = 24, seed: int = 0) -> np.ndarray:
     # Сид со смещением: перестановка калибровки не должна совпадать с fit/score-сплитами
     # замерителей (joint_gain, library_sweep) — при одинаковом default_rng(seed) сплит
