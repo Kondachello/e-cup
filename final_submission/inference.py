@@ -83,35 +83,31 @@ VAL_ANCHOR_ISO = "2026-01-14"
 # ============================================================================ #
 #  ШАГ 3. СОСТАВ И ВЕСА БЛЕНДА                                                 #
 # ============================================================================ #
-# Источник: work/reports/blend_reopt.json, ключ "winner" — библиотека B_plus_cal
-# (203 модели), метод ridge_free, alpha_rel 1e-4. val 1.666302, честный OOF по
-# 5 фолдам по ПОЛЬЗОВАТЕЛЯМ 1.666419.
+# Источник: work/reports/blend_reopt_2026-08-21.json (ЗАКОММИЧЕН), ключ "winner" —
+# библиотека B_plus_cal, метод nnls_free. val 1.665647, честный OOF по 5 фолдам
+# по ПОЛЬЗОВАТЕЛЯМ 1.665764. Устойчивость проверена бутстрапом приватного размера:
+# новый состав выигрывает у прежнего в 4000 из 4000 сплитов
+# (work/reports/night_blend_stability.md), выигрыш диффузный, сегментов-минусов нет.
 #
 # ЗАФИКСИРОВАНО ЗДЕСЬ НАМЕРЕННО. blend_reopt.json переписывается при каждом
 # перезапуске оптимизатора (в том числе пока идёт разработка), а пакет обязан
 # собирать один и тот же файл. Сверить состав с текущим отчётом:
 #     python final_submission/inference.py --stage check --verify-blend
 BLEND_WEIGHTS = {
-    "fusion_v3c_avg_cal":  0.230705,
-    "fusion_v3ctl_cal":    0.151006,
-    "c_ts2_s7_cal":        0.090592,
-    "mlpziln_cal_avg_cal": 0.077215,
-    "c_ts2_s42_cal":       0.075589,
-    "wklin":               0.067217,
-    "behavonly_avg_cal":   0.057488,
-    "seq2tr_f_cal":        0.049046,
-    "weak_an_d_cal":       0.043814,
-    "weak_ft_recency_cal": 0.023857,
-    "countaov_s7_cal":     0.023260,
-    "wklin_wk":            0.019400,
-    "weak_ft_counts_cal":  0.017269,
-    "hmmsim_cal":          0.016734,
-    "fusion_v3_cal":       0.015661,
-    "twl_v7_cal":          0.014492,
-    "febspec2_cal":        0.012494,
-    "hmmsim":              0.007364,
-    "weak_ft_long90_cal":  0.007295,
-    "c_xtw_s42":           0.004399,
+    "kostya46_cal":        0.246021,
+    "fusion_v3c_avg_cal":  0.228925,
+    "gseq_small_s42_cal":  0.108701,
+    "fusion_v3ctl_cal":    0.106124,
+    "wklin":               0.070987,
+    "weak_an_d_cal":       0.045493,
+    "weak_ft_recency_cal": 0.043429,
+    "behavonly_avg_cal":   0.041373,
+    "lagd28":              0.035049,
+    "c_ts2_s42_cal":       0.033278,
+    "gseq_big_s42_cal":    0.024431,
+    "fusion_f_cal":        0.010602,
+    "febspec2_cal":        0.008916,
+    "wklin_wk_cal":        0.002788,
 }
 
 # Член бленда -> (базовые прогнозы, усредняемые в log1p; имя таблицы калибровки).
@@ -120,26 +116,20 @@ BLEND_WEIGHTS = {
 # применяется ПОСЛЕ усреднения — так эти члены и собирались.
 # cal=None означает, что член входит в бленд сырым (так его выбрал оптимизатор).
 MEMBER_PARTS: dict[str, tuple[list[str], str | None]] = {
+    "kostya46_cal":        (["kostya46"], "kostya46_cal"),
     "fusion_v3c_avg_cal":  (["fusion_v3c42", "fusion_v3c555", "fusion_v3c7"], "fusion_v3c_avg_cal"),
+    "gseq_small_s42_cal":  (["gseq_small_s42"], "gseq_small_s42_cal"),
     "fusion_v3ctl_cal":    (["fusion_v3ctl"], "fusion_v3ctl_cal"),
-    "c_ts2_s7_cal":        (["c_ts2_s7"], "c_ts2_s7_cal"),
-    "mlpziln_cal_avg_cal": (["mlpziln_c42", "mlpziln_c1337", "mlpziln_c7"], "mlpziln_cal_avg_cal"),
-    "c_ts2_s42_cal":       (["c_ts2_s42"], "c_ts2_s42_cal"),
     "wklin":               (["wklin"], None),
-    "behavonly_avg_cal":   (["behavonly", "behavonly_s1337", "behavonly_s7"], "behavonly_avg_cal"),
-    "seq2tr_f_cal":        (["seq2tr_f"], "seq2tr_f_cal"),
     "weak_an_d_cal":       (["weak_an_d"], "weak_an_d_cal"),
     "weak_ft_recency_cal": (["weak_ft_recency"], "weak_ft_recency_cal"),
-    "countaov_s7_cal":     (["countaov_s7"], "countaov_s7_cal"),
-    "wklin_wk":            (["wklin_wk"], None),
-    "weak_ft_counts_cal":  (["weak_ft_counts"], "weak_ft_counts_cal"),
-    "hmmsim_cal":          (["hmmsim"], "hmmsim_cal"),
-    "fusion_v3_cal":       (["fusion_v3"], "fusion_v3_cal"),
-    "twl_v7_cal":          (["twl_v7"], "twl_v7_cal"),
+    "behavonly_avg_cal":   (["behavonly", "behavonly_s1337", "behavonly_s7"], "behavonly_avg_cal"),
+    "lagd28":              (["lagd28"], None),
+    "c_ts2_s42_cal":       (["c_ts2_s42"], "c_ts2_s42_cal"),
+    "gseq_big_s42_cal":    (["gseq_big_s42"], "gseq_big_s42_cal"),
+    "fusion_f_cal":        (["fusion_f"], "fusion_f_cal"),
     "febspec2_cal":        (["febspec2"], "febspec2_cal"),
-    "hmmsim":              (["hmmsim"], None),
-    "weak_ft_long90_cal":  (["weak_ft_long90"], "weak_ft_long90_cal"),
-    "c_xtw_s42":           (["c_xtw_s42"], None),
+    "wklin_wk_cal":        (["wklin_wk"], "wklin_wk_cal"),
 }
 
 # ---------------------------------------------------------------------------- #
@@ -175,18 +165,35 @@ BASES: dict[str, dict] = {
         env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4", "POLARS_MAX_THREADS": "3"},
         cmd="work/scripts/train_fusion3.py --name fusion_v3ctl --final --epochs 3 --batch 2048 "
             "--eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 --eval-every 984 --n-ch 8"),
-    "fusion_v3": dict(
-        persist="preds", secs=921, tier="seq3",
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4", "POLARS_MAX_THREADS": "3"},
-        cmd="work/scripts/train_fusion3.py --name fusion_v3 --final --epochs 3 --batch 2048 "
-            "--eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 --eval-every 984 --n-ch 12"),
-    "c_ts2_s7": dict(
-        persist="weights", secs=471,
-        env={"USE_V2": "1", "USE_V3": "1", "OMP_NUM_THREADS": "6"},
-        cmd="work/scripts/train_gbdt.py --name c_ts2_s7 --threads 6 --gap-days 30 --model lgb "
-            "--objective two_stage --n-anchors 14 --seed 7 "
-            "--params '{\"num_leaves\":127,\"min_data_in_leaf\":500,\"n_estimators\":5000}' "
-            "--params2 '{\"num_leaves\":255,\"min_data_in_leaf\":100,\"n_estimators\":5000}'"),
+    # ---- члены пересборки 21.08 (эталон 1.665647) ----
+    "kostya46": dict(
+        persist="preds", secs=5400, approx_secs=True,
+        env={},
+        cmd="пайплайн Кости: work_kostya/scripts (cube.py 379/409 -> train_model.py + "
+            "train_model2.py -> train_test_model.py + train_test_m1.py; пути /root/* поправить "
+            "на корень репозитория). АРТЕФАКТЫ В GIT: work_kostya/preds/kostya46_{val,test}.parquet "
+            "-> скопировать в work/preds"),
+    "gseq_small_s42": dict(
+        persist="preds", secs=10800, approx_secs=True,
+        env={},
+        cmd="Colab GPU, work/colab (рука small: 112 дней, 8 срезов; конфиг work/colab/out/"
+            "gseq_small_s42.json). АРТЕФАКТЫ В GIT: work/colab/out/gseq_small_s42_{val,test}.parquet "
+            "-> скопировать в work/preds"),
+    "gseq_big_s42": dict(
+        persist="preds", secs=10800, approx_secs=True,
+        env={},
+        cmd="Colab GPU, work/colab (рука big: 364 дня; прогон оборван на step 4500/11736 — точное "
+            "повторение невозможно). АРТЕФАКТЫ В GIT: work/colab/out/gseq_big_s42_{val,test}.parquet "
+            "-> скопировать в work/preds. Вес 0.024, LOO-потеря +0.000006 — кандидат на исключение"),
+    "lagd28": dict(
+        persist="preds", secs=787,
+        env={"USE_V2": "1", "USE_V3": "1"},
+        cmd="work/scripts/lag_tta.py --prefix lagd --lags 0,14,28,42,56,70 --test --seed 42"),
+    "fusion_f": dict(
+        persist="preds", secs=921, approx_secs=True,
+        env={},
+        cmd="тензоры seq2 (11 ГБ) УДАЛЕНЫ — повторное обучение невозможно, артефакт только прогноз "
+            "work/preds/fusion_f_{val,test}.parquet; вес 0.011 — кандидат на исключение при заморозке"),
     "c_ts2_s42": dict(
         persist="weights", secs=303,
         env={"USE_V2": "1", "USE_V3": "1", "OMP_NUM_THREADS": "6"},
@@ -194,21 +201,6 @@ BASES: dict[str, dict] = {
             "--objective two_stage --n-anchors 14 --seed 42 "
             "--params '{\"num_leaves\":127,\"min_data_in_leaf\":500,\"n_estimators\":5000}' "
             "--params2 '{\"num_leaves\":255,\"min_data_in_leaf\":100,\"n_estimators\":5000}'"),
-    "mlpziln_c42": dict(
-        persist="weights", secs=248,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_mlpziln.py --name mlpziln_c42 --n-anchors 14 --gap-days 30 "
-            "--seeds 42 --es-metric cal"),
-    "mlpziln_c1337": dict(
-        persist="weights", secs=188,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_mlpziln.py --name mlpziln_c1337 --n-anchors 14 --gap-days 30 "
-            "--seeds 1337 --es-metric cal"),
-    "mlpziln_c7": dict(
-        persist="weights", secs=112,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_mlpziln.py --name mlpziln_c7 --n-anchors 14 --gap-days 30 "
-            "--seeds 7 --es-metric cal"),
     # ОДИН запуск train_wklin.py пишет СРАЗУ три набора: wklin_base, wklin, wklin_wk.
     # Отдельно wklin_wk получить нельзя. Сида нет: гребневая регрессия детерминирована.
     "wklin": dict(
@@ -233,11 +225,6 @@ BASES: dict[str, dict] = {
         persist="weights", secs=442,
         env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4", "POLARS_MAX_THREADS": "3"},
         cmd="work/scripts/train_behavonly.py --name behavonly_s7 --seed 7 --threads 4"),
-    "seq2tr_f": dict(
-        persist="weights", secs=19485, tier="seq2",
-        env={"OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_seq2.py --name seq2tr_f --arch tr --final --epochs 3 "
-            "--batch 2048 --lr 1e-3 --seeds 42,1337 --threads 4"),
     "weak_an_d": dict(
         persist="weights", secs=123,
         env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
@@ -250,35 +237,6 @@ BASES: dict[str, dict] = {
         cmd="work/scripts/train_weak.py --name weak_ft_recency --threads 4 --mech ftype "
             "--ftype recency --n-anchors 14 --model lgb --objective log_mse "
             "--params '{\"objective\":\"tweedie\",\"tweedie_variance_power\":1.45,\"n_estimators\":6000}'"),
-    "weak_ft_counts": dict(
-        persist="weights", secs=190, approx_secs=True,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_weak.py --name weak_ft_counts --threads 4 --mech ftype "
-            "--ftype counts --n-anchors 14 --model lgb --objective log_mse "
-            "--params '{\"objective\":\"tweedie\",\"tweedie_variance_power\":1.45,\"n_estimators\":6000}'"),
-    "weak_ft_long90": dict(
-        persist="weights", secs=190, approx_secs=True,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4"},
-        cmd="work/scripts/train_weak.py --name weak_ft_long90 --threads 4 --mech ftype "
-            "--ftype long90 --n-anchors 14 --model lgb --objective log_mse "
-            "--params '{\"objective\":\"tweedie\",\"tweedie_variance_power\":1.45,\"n_estimators\":6000}'"),
-    "countaov_s7": dict(
-        persist="weights", secs=489,
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "OMP_NUM_THREADS": "4", "POLARS_MAX_THREADS": "3"},
-        cmd="work/scripts/train_countaov.py --name countaov_s7 --threads 4 --n-anchors 14 "
-            "--gap-days 30 --seed 7"),
-    "hmmsim": dict(
-        persist="stateless", secs=366,
-        env={"THREADS": "6"},
-        cmd="work/scripts/train_hmm_sim.py --name hmmsim --states 4 --sims 500 --win 120 "
-            "--em-cap 25000 --splits val,test"),
-    "twl_v7": dict(
-        persist="weights", secs=187, tier="v7",
-        env={"USE_V2": "1", "USE_V3": "1", "USE_V4": "1", "USE_V7": "1",
-             "OMP_NUM_THREADS": "6", "POLARS_MAX_THREADS": "3"},
-        cmd="work/scripts/train_gbdt.py --name twl_v7 --threads 6 --gap-days 30 --model lgb "
-            "--objective log_mse --n-anchors 8 --seed 42 "
-            "--params '{\"objective\":\"tweedie\",\"tweedie_variance_power\":1.45,\"n_estimators\":6000}'"),
     # febspec2 не использует табличные тиры вовсе: у него свой короткоисторический
     # набор (build_features_short.py), который он при необходимости пересобирает сам
     "febspec2": dict(
@@ -286,13 +244,6 @@ BASES: dict[str, dict] = {
         env={"OMP_NUM_THREADS": "3", "POLARS_MAX_THREADS": "3", "THREADS": "3"},
         cmd="work/scripts/train_febspec2.py --name febspec2 --config auto --cohort 0.20 --threads 3"),
     # c_xtw_s42 обучен train_gbdt.py --model xgb, БЕЗ USE_V4 (194 признака), как и c_ts2_*
-    "c_xtw_s42": dict(
-        persist="weights", secs=246,
-        env={"USE_V2": "1", "USE_V3": "1", "OMP_NUM_THREADS": "6"},
-        cmd="work/scripts/train_gbdt.py --name c_xtw_s42 --threads 6 --gap-days 30 --model xgb "
-            "--objective log_mse --n-anchors 10 --seed 42 "
-            "--params '{\"objective\":\"reg:tweedie\",\"tweedie_variance_power\":1.2,\"max_leaves\":511,"
-            "\"min_child_weight\":100,\"learning_rate\":0.05,\"colsample_bytree\":0.8,\"n_estimators\":6000}'"),
 }
 
 # ============================================================================ #
@@ -326,6 +277,13 @@ A_NEW = 0.65
 CHAIN_NPZ = "chain_test.npz"
 
 # Контрольные значения итогового файла (250000 строк).
+
+# (до пяти проб 20.08). Ночь 21.08 установила, что разброс 1.6470 был СБИТ
+# поправкой на молчащих (полгода незамеченно), оптимум разброса 1.631108 (проба
+# mdl_amber, +0.000125).
+# + дельты mdl_flint/mdl_gneis2/R6 (скрипты work/scripts/{probes5_make,make_r6,make_u_candidates}.py,
+# все константы зафиксированы и закоммичены). ПРИ ЗАМОРОЗКЕ ФИНАЛА шаги 4-6
+# пересвести на неё; у финального файла EXPECT_SD = 1.6311.
 EXPECT_MEAN = 2.3247
 EXPECT_SD = 1.6470
 
@@ -435,10 +393,8 @@ def missing_features() -> list[tuple[str, str, str]]:
     if not seq3.exists():
         out.append(("тензоры seq3 (fusion_v3*, 3.4 ГБ)", str(seq3),
                     "POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/build_seq3.py --max-train 8"))
-    seq2 = ROOT / "work" / "seq2" / f"anchor={TEST_ANCHOR_ISO}.npy"
-    if not seq2.exists():
-        out.append(("тензоры seq2 (seq2tr_f, ~11 ГБ, удалены)", str(seq2),
-                    "POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/build_seq2.py"))
+    # seq2 больше не нужен: seq2tr_f выпал из состава при пересборке 21.08, а
+    # fusion_f остаётся предикт-артефактом (его тензоры удалены, ретрейна нет)
     return out
 
 
@@ -455,8 +411,7 @@ def stage_features() -> None:
                "--states", "4", "--sims", "300", "--win", "120",
                "--em-cap", "15000", "--seed", "42")
     run_script("build_seq3.py", "--max-train", "8", env={"POLARS_MAX_THREADS": "3"})
-    if not (ROOT / "work" / "seq2" / f"anchor={TEST_ANCHOR_ISO}.npy").exists():
-        run_script("build_seq2.py", env={"POLARS_MAX_THREADS": "3"})
+    # seq2 не собирается: в составе 21.08 нет членов на этих тензорах
     log("признаки и тензоры готовы")
 
 
