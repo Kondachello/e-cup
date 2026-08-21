@@ -17,19 +17,29 @@
 
 ## Ячейка 1 — код и раскладка
 
+ВАЖНО: Kaggle РАСПАКОВЫВАЕТ zip при создании датасета — в /kaggle/input лежит
+уже дерево, а не архив. Ячейка обрабатывает оба случая.
+
 ```python
-import shutil, subprocess, sys, glob, os
-# распаковка бандла с сохранением путей work/scripts/seq/...
-subprocess.run(["unzip", "-oq", glob.glob("/kaggle/input/*/tfm3b_bundle.zip")[0],
-                "-d", "/kaggle/working"], check=True)
+import subprocess, sys, glob, os, shutil
 os.chdir("/kaggle/working")
+z = glob.glob("/kaggle/input/*/tfm3b_bundle.zip")
+if z:
+    subprocess.run(["unzip", "-oq", z[0], "-d", "/kaggle/working"], check=True)
+else:
+    hits = glob.glob("/kaggle/input/*/work/scripts/seq/run_all.py")
+    assert hits, f"нет ни zip, ни дерева; смонтировано: {os.listdir('/kaggle/input')}"
+    src = hits[0].split("/work/")[0]
+    shutil.copytree(f"{src}/work", "/kaggle/working/work", dirs_exist_ok=True)
 os.makedirs("work/preds", exist_ok=True)
 try:
     import polars  # build_tensor/avg_seeds
 except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "-q", "install", "polars"], check=True)
-data = glob.glob("/kaggle/input/*/train.parquet")[0]
-print("данные:", data)
+data = glob.glob("/kaggle/input/*/train.parquet")
+assert data, f"нет train.parquet; смонтировано: {os.listdir('/kaggle/input')}"
+data = data[0]
+print("код: ок; данные:", data)
 ```
 
 ## Ячейка 2 — тензор (~5-10 мин, дождаться конца)
