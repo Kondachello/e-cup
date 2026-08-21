@@ -478,3 +478,23 @@ blend_opt	1.665678	re-optimised blend: lib=B_plus_cal(217) method=ridge_free alp
 blend_opt	1.665696	re-optimised blend: lib=B_plus_cal(216) method=ridge_free alpha_rel=0.0003; OOF(5f by user)=1.665847; current mix val 1.667432; w={'kostya46_cal': 0.2203, 'fusion_v3c42_cal': 0.1057, 'gseq_small_s42_cal': 0.102, 'fusion_v3_cal': 0.069, 'weak_an_d_cal': 0.0522, 'fusion_f_cal': 0.0507, 'behavonly_avg_cal': 0.0442, 'c_ts2_s42_cal': 0.0411, 'fusion_v3c7_cal': 0.0397, 'lagd28': 0.0362, 'weak_ft_recency_cal': 0.0351, 'wklin': 0.035, 'mlpziln_cal_avg_cal': 0.0347, 'gseq_big_s42_cal': 0.0326, 'fusion_v3ctl_cal': 0.0295, 'c_ts2_s7_cal': 0.0271, 'fusion_avg_cal': 0.0232, 'hz_v1_pb': 0.0226, 'febspec2_cal': 0.0019, 'wklin_wk_cal': 0.0016}
 c_ts2_s42_cal	1.668343	binned log-shift calibration of c_ts2_s42; holdout 1.693628->1.668966
 fusion_f_cal	1.668794	binned log-shift calibration of fusion_f; holdout 1.685224->1.669033
+kostya46_avg2_cal	1.669760	binned log-shift calibration of kostya46_avg2; holdout 1.702406->1.670246
+mlpcdf	1.708175	cdf-mlp B64(K63) ls0.05 512,256 do0.15 lr0.001 bs8192 gap30 seeds=42 14anch ep=[1]
+mlpcdf_esc	1.730849	cdf-mlp B64(K63) ls0.05 512,256 do0.15 lr0.001 bs8192 gap30 seeds=42 14anch ep=[2]; es=cal
+c_ts2_avg	1.692359	seed-avg of 5: ['c_ts2_s42', 'c_ts2_s1337', 'c_ts2_s7', 'c_ts2_s2024', 'c_ts2_s555']; лучший одиночный 1.691946
+mlpziln_avg	1.676064	seed-avg of 3: ['mlpziln', 'mlpziln_b', 'mlpziln_c']; лучший одиночный 1.675688
+countaov_avg	1.693139	seed-avg of 3: ['countaov', 'countaov_s1337', 'countaov_s7']; лучший одиночный 1.693565
+fusion_avg	1.692869	seed-avg of 2: ['fusion_f', 'fusion_s7']; лучший одиночный 1.685104
+channel_avg	1.687155	seed-avg of 2: ['channel2', 'channel_s1337']; лучший одиночный 1.687216
+twl_v7_avg	1.693537	seed-avg of 3: ['twl_v7', 'twl_v7_s1337', 'twl_v7_s7']; лучший одиночный 1.693765
+behavonly_avg	1.710680	seed-avg of 3: ['behavonly', 'behavonly_s1337', 'behavonly_s7']; лучший одиночный 1.710653
+mlpbin_c9_avg	1.681632	seed-avg of 3: ['mlpbin_ca', 'mlpbin_cb', 'mlpbin_cc']; лучший одиночный 1.679282
+mlpziln_c9_avg	1.678646	seed-avg of 3: ['mlpziln_ca', 'mlpziln_cb', 'mlpziln_cc']; лучший одиночный 1.676484
+mlpziln_cal_avg	1.681428	seed-avg of 3: ['mlpziln_c42', 'mlpziln_c1337', 'mlpziln_c7']; лучший одиночный 1.680350
+mlpbin_avg	1.677177	seed-avg of 4: ['mlpbin', 'mlpbin_b', 'mlpbin_c', 'mlpbin_d']; лучший одиночный 1.676423
+fusion_v3c_avg	1.693128	seed-avg of 3: ['fusion_v3c555', 'fusion_v3c42', 'fusion_v3c7']; лучший одиночный 1.685609
+fusion_v3_fine_avg	1.677117	seed-avg of 5: ['fusion_v3_fine42', 'fusion_v3_fine1337', 'fusion_v3_fine7', 'fusion_v3_fine555', 'fusion_v3_fine2024']; лучший одиночный 1.677108
+fusion_v3_avg	1.681560	seed-avg of 5: ['fusion_v3', 'fusion_v3_s1337', 'fusion_v3_s7', 'fusion_v3_s2024', 'fusion_v3_s555']; лучший одиночный 1.678275
+fusion_v3ctl_cal	1.670016	binned log-shift calibration of fusion_v3ctl; holdout 1.691537->1.670647
+fusion_v3c_avg_cal	1.667810	binned log-shift calibration of fusion_v3c_avg; holdout 1.693159->1.668080
+wklin_wk_cal	1.698418	binned log-shift calibration of wklin_wk; holdout 1.730281->1.697660
