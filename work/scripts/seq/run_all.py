@@ -95,6 +95,9 @@ def main() -> int:
     ap.add_argument("--minutes", type=float, default=55, help="бюджет одного прогона фазы A")
     ap.add_argument("--out", default="_to_kosta", help="куда сложить результат")
     ap.add_argument("--skip-b", action="store_true", help="только фаза A")
+    ap.add_argument("--stale-seeds", default="",
+                    help="сиды для этапа C через запятую; пусто = все. "
+                         "Нужен, когда чекпойнт фазы B готов не для всех сидов")
     ap.add_argument("--stale", type=int, default=0,
                     help="этап C: инференс тем же чекпойнтом с якоря на N дней раньше "
                          "(запрос трека 4). 28 = якоря 350 (val) и 380 (test). "
@@ -313,7 +316,11 @@ def main() -> int:
               f"{TEST_A - BOUND_B} дн, застоялость {408 - TEST_A} дн")
         arch = ["--arch", "transformer", "--channels", "192", "--layers", "4",
                 "--heads", "4", "--dropout", "0.0", "--batch", "512", "--ema", "0.995"]
-        for sd in SEEDS:
+        sseeds = ([int(x) for x in a.stale_seeds.split(",") if x.strip()]
+                  if a.stale_seeds else list(SEEDS))
+        print(f"  сиды этапа C: {', '.join(map(str, sseeds))}"
+              + ("  (усреднения не будет, сид один)" if len(sseeds) == 1 else ""))
+        for sd in sseeds:
             base = f"tfm2_s{sd}"
             cal = str(plan[base]["shrink"]) if base in plan else "0.95"
             for side, ckpt, tag, extra in (
@@ -335,20 +342,28 @@ def main() -> int:
             STALE_TAGS.append(base)
         # val-выгрузка тестовой стороны сделана чекпойнтом фазы B, который учился
         # по 378 — якорь 350 внутри его обучения. Изолируем.
-        for sd in SEEDS:
+        for sd in sseeds:
             bad = root / "work" / "preds" / f"tfm2_s{sd}_rtstale{S}_val.parquet"
             if bad.exists():
                 bad.rename(bad.with_suffix(".parquet.LEAKY_DO_NOT_USE"))
         # усреднение трёх сидов в одну пару, как просил трек 4
-        for side, tags in (("val", [f"tfm2_s{d}_stale{S}_val.parquet" for d in SEEDS]),
-                           ("test", [f"tfm2_s{d}_rtstale{S}_test.parquet" for d in SEEDS])):
+        for side, tags in (("val", [f"tfm2_s{d}_stale{S}_val.parquet" for d in sseeds]),
+                           ("test", [f"tfm2_s{d}_rtstale{S}_test.parquet" for d in sseeds])):
             srcs = [root / "work" / "preds" / t for t in tags]
             if not all(x.exists() for x in srcs):
                 print(f"  усреднение {side}: не хватает файлов, пропускаю"); continue
             out_p = root / "work" / "preds" / f"tfm3_stale{S}_{side}.parquet"
-            if run([py, str(seq / "avg_seeds.py"), "--out", str(out_p), *[str(x) for x in srcs]],
-                   logs / f"avg_stale{S}_{side}.log"):
+            if len(srcs) == 1:
+                shutil.copy2(srcs[0], out_p)
+                print(f"  {side}: один сид, копия без усреднения -> {out_p.name}")
+            elif run([py, str(seq / "avg_seeds.py"), "--out", str(out_p), *[str(x) for x in srcs]],
+                     logs / f"avg_stale{S}_{side}.log"):
                 raise SystemExit(f"усреднение {side} упало")
+            # work/handoff — договорённая точка обмена с треком 4: она НЕ в .gitignore,
+            # в отличие от work/preds, поэтому файлы уезжают к ним обычным коммитом
+            hand = root / "work" / "handoff"; hand.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(out_p, hand / out_p.name)
+            print(f"  -> work/handoff/{out_p.name}")
 
     # ---------- 5. собрать ----------
     if a.dry_run: print("\n--dry-run: ничего не запускалось"); return 0
