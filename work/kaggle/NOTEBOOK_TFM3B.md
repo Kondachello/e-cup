@@ -23,21 +23,29 @@
 ```python
 import subprocess, sys, glob, os, shutil
 os.chdir("/kaggle/working")
-z = glob.glob("/kaggle/input/*/tfm3b_bundle.zip")
+def find(pat):
+    # раскладка /kaggle/input меняется (бывает /kaggle/input/datasets/<user>/<slug>/):
+    # ищем рекурсивно на любой глубине
+    return sorted(glob.glob(f"/kaggle/input/**/{pat}", recursive=True))
+z = find("tfm3b_bundle.zip")
+tree = find("work/scripts/seq/run_all.py")
 if z:
     subprocess.run(["unzip", "-oq", z[0], "-d", "/kaggle/working"], check=True)
-else:
-    hits = glob.glob("/kaggle/input/*/work/scripts/seq/run_all.py")
-    assert hits, f"нет ни zip, ни дерева; смонтировано: {os.listdir('/kaggle/input')}"
-    src = hits[0].split("/work/")[0]
+elif tree:
+    src = tree[0].split("/work/")[0]
     shutil.copytree(f"{src}/work", "/kaggle/working/work", dirs_exist_ok=True)
+else:
+    for r, d, f in os.walk("/kaggle/input"):
+        print(r, "->", f[:5])
+        if r.count("/") - 2 >= 4: d[:] = []
+    raise SystemExit("код не найден — смотри дерево выше")
 os.makedirs("work/preds", exist_ok=True)
 try:
     import polars  # build_tensor/avg_seeds
 except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "-q", "install", "polars"], check=True)
-data = glob.glob("/kaggle/input/*/train.parquet")
-assert data, f"нет train.parquet; смонтировано: {os.listdir('/kaggle/input')}"
+data = find("train.parquet")
+assert data, "нет train.parquet — проверь Add Input"
 data = data[0]
 print("код: ок; данные:", data)
 ```
