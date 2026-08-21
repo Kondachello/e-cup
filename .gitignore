@@ -41,6 +41,8 @@ work/seq3/
 work/seq2/
 work/data/*.npy
 work/data/*.npz
+# локальные артефакты сид-прогонов kostya46 (кубы ~4.6 ГБ и матрицы; пересобираются 986–987)
+work_kostya/work/
 work/yoy_dirs.npz
 work/reports/mb_fix_*.npz
 work/reports/mb_fix_*.npy
