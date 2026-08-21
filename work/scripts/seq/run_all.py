@@ -376,11 +376,13 @@ def main() -> int:
             elif run([py, str(seq / "avg_seeds.py"), "--out", str(out_p), *[str(x) for x in srcs]],
                      logs / f"avg_stale{S}_{side}.log"):
                 raise SystemExit(f"усреднение {side} упало")
-            # work/handoff — договорённая точка обмена с треком 4: она НЕ в .gitignore,
-            # в отличие от work/preds, поэтому файлы уезжают к ним обычным коммитом
-            hand = root / "work" / "handoff"; hand.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(out_p, hand / out_p.name)
-            print(f"  -> work/handoff/{out_p.name}")
+            # В work/handoff НЕ пишем намеренно. Эта папка отслеживается git, и запись
+            # в неё с расчётной машины даёт две беды: git pull ловит столкновение с
+            # неотслеживаемыми файлами, и — важнее — в точку обмена попадает результат,
+            # который ещё никто не проверил (первая версия этого файла вышла на 40000
+            # юзеров вместо 250000 и уехала бы к соседнему треку как есть).
+            # Копия едет в _to_kosta, а в work/handoff её кладут вручную после сверки.
+            print(f"  -> work/preds/{out_p.name} (в work/handoff класть после проверки)")
 
     # ---------- 5. собрать ----------
     if a.dry_run: print("\n--dry-run: ничего не запускалось"); return 0
