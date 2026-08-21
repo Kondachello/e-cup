@@ -70,6 +70,8 @@ MEASURED: list[tuple[str, str, float]] = [
     ("R3_ridge",         "R3_ridge.csv",                   1.6478842656567172),
     ("R5_shade",         "R5_shade.csv",                   1.6475208699),
     ("S1_segwall",       "S1_segwall.csv",                 1.6478780790944672),
+    ("V1_tfm3b_pre",     "V1_tfm3b_pre.csv",               1.647284324),
+    ("V2_tfm3b_opt",     "V2_tfm3b_opt.csv",               1.6472259177),
 
 ]
 
