@@ -1,99 +1,105 @@
-# Ночная ревизия: инвентарь воспроизводимости действующего бленда (21.08, ~04:00)
+# Ночная ревизия: инвентарь воспроизводимости действующего бленда (21.08, обновлено 19:0x после закрытия очереди)
 
 Действующий бленд = `work/reports/blend_reopt.json`, ключ `winner` (lib B_plus_cal,
 nnls_free, val **1.665647**, OOF 1.665764). 14 членов, Σ|w| = **1.006117** (nnls без
 ограничения суммы). Эталон подтверждён замером: колонка `blend` из
 `work/preds_pack/val_preds.parquet` даёт RMSLE **1.665647** против target.
 
-**Алгебра сходится побитово (в пределах float32):** Σ wᵢ·log1p(членᵢ) по колонкам пака
+**Алгебра сходится (в пределах float32):** Σ wᵢ·log1p(членᵢ) по колонкам пака
 воспроизводит колонку `blend` с max|Δ| = 3.83e-07 (val) и 3.89e-07 (test), RMSLE
-пересборки 1.665647. Пак пересобран этой ночью в 00:43 (после регенерации lagd28) и
-**закоммичен** (pack-new, ветка sasha, дерево чистое) — то есть весь действующий бленд,
+пересборки 1.665647 — скрытых шагов между членами и блендом нет. Пак закоммичен
+(pack-new, ветка sasha; на 18:52 дерево по preds_pack чистое) — весь действующий бленд,
 включая калиброванные версии всех 14 членов на val И test, лежит в git.
+
+**Статус ночной очереди: 975–985 ВСЕ завершены, exit 0** (таймлайн 00:04–02:50;
+исключение — 975/976 lagd_regen с урезанным списком лагов `--lags 0,28,42`, оба exit 1;
+рабочей оказалась полная команда 978). Ретрейны перезаписали work/preds — замерено ниже.
 
 ## Инвентарь по членам
 
 Обозначения: (a) откуда val/test parquet; (b) веса/бустеры в `work/models` (сам каталог
 в .gitignore — всё локально); (c) чем обучается; (d) вердикт.
-«ночь» = закрывается ночной очередью 980–985 (сейчас в pending; 979 hazard_v1 работает с 01:08).
+«закрыто ночью» = job 980–985, exit 0, время московское 21.08.
 
 | # | член | вес | (a) preds | (b) веса в work/models | (c) обучение (команда) | (d) вердикт |
 |---|------|-----|-----------|------------------------|------------------------|-------------|
-| 2 | fusion_v3c_avg_cal | 0.228925 | базы fusion_v3c{42,555,7} только work/preds (локально); avg и _cal колонки в паке (git) | только *_stats.npz, .pt НЕТ; fusion_v3c_avg_cal.npz есть | done 833/832/835: `train_fusion3.py --name fusion_v3cXX --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds XX --threads 4 --eval-every 492 --n-ch 12 --es-metric cal` (1050/952/918s) → merge_seeds.py → calibrate.py | прогноз-артефакт (torch/MPS ретрейн не побитовый) — **закрывается этой ночью** (981–983 с save_torch p1/p2 + 985 merge+recal) |
-| 3 | gseq_small_s42_cal | 0.108701 | **git**: work/colab/out/gseq_small_s42_{val,test}.parquet + json конфига | нет; gseq_small_s42_cal.npz есть | work/colab/gpu_seq.py (git) на Colab GPU; cfg L=112,d=96,2 слоя,4 головы,ff=192, lr 3e-4, 3 эпохи, 4.9 мин GPU; cal_rmsle 1.698129 | **только предикт-артефакт в git** (нужен внешний GPU; веса не сохранялись) |
-| 4 | fusion_v3ctl_cal | 0.106124 | базы только work/preds; _cal в паке (git) | только fusion_v3ctl_stats.npz; fusion_v3ctl_cal.npz есть | done 851: `train_fusion3.py --name fusion_v3ctl --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 --eval-every 984 --n-ch 8` (875s) | прогноз-артефакт — **закрывается этой ночью** (980 + 985) |
-| 5 | wklin (сырой) | 0.070987 | work/preds локально; колонка в паке (git) | нет (train_wklin без model_io; ridge) | `train_wklin.py --name wklin --emit-tier` (91s, USE_V2/3/4; один запуск пишет wklin_base+wklin+wklin_wk) | **воспроизводим из чистого клона**: ridge детерминирован, сида нет; ночью 984 перегенерирует протокольно |
-| 6 | weak_an_d_cal | 0.045493 | work/preds локально; _cal в паке (git) | **weak_an_d.txt (9.2MB) + meta + cal.npz — есть** | done 9035: `train_weak.py --name weak_an_d --mech anchors --k-anchors 4 --sel-seed 77 --anchor-pool 0 --model lgb --objective log_mse --params '{tweedie 1.45, n_est 6000}'` (123s) + calibrate | **воспроизводим из чистого клона** (плюс веса на диске) |
-| 7 | weak_ft_recency_cal | 0.043429 | work/preds локально; _cal в паке (git) | **weak_ft_recency.txt + meta + cal.npz — есть** | done 902: `train_weak.py --mech ftype --ftype recency --n-anchors 14 ...` (~190s) + calibrate | **воспроизводим из чистого клона** |
-| 8 | behavonly_avg_cal | 0.041373 | базы behavonly{,_s1337,_s7} в work/preds; avg_cal в паке (git) | s1337.txt и s7.txt есть; **бустер сида 42 отсутствует** (обучен до model_io); avg_cal.npz есть | done 260/776/777: `train_behavonly.py` (сид 42 с `--n-anchors 14`, 214s; s1337/s7 без флага = 27 якорей, 427/442s) → merge_seeds → calibrate | **воспроизводим из чистого клона** (LGB детерминирован; дешёвый ретрейн сида 42) |
-| 9 | lagd28 (сырой) | 0.035049 | work/preds, перегенерирован этой ночью (00:28/00:38, job 978); обе колонки в паке (git) | весов нет ПО ПОСТРОЕНИЮ (lag-TTA: обучение при предикте) | done 978: `lag_tta.py --prefix lagd --lags 0,14,28,42,56,70 --test --seed 42` (787s); тест отдельно: 977 `--test-only 61` (171s) | **воспроизводим из чистого клона** (детерминированный LGB; ночная регенерация это подтвердила) |
-| 10 | c_ts2_s42_cal | 0.033278 | базы в work/preds; _cal в паке (git) | бустеров нет (до model_io); **c_ts2_s42_cal.npz — единственная отсутствующая cal-таблица** (видно в --stage check) | done 130: `train_gbdt.py --name c_ts2_s42 --model lgb --objective two_stage --n-anchors 14 --seed 42 --gap-days 30 --params '{leaves 127/255,...}'` (303s) + `calibrate.py --pred c_ts2_s42` | **воспроизводим из чистого клона** (ретрейн теперь сохранит __stage1/__stage2 бустеры) |
-| 11 | gseq_big_s42_cal | 0.024431 | **git**: work/colab/out/gseq_big_s42_{val,test}.parquet + json | нет; cal.npz есть | gpu_seq.py arm=big (L=364,d=256,6 слоёв); **обучение оборвано на step 4500/11736 (done:false), взят ckpt-avg 1.677205** | **только предикт-артефакт в git**: точный повтор невозможен даже на GPU (обрыв не воспроизводится) |
-| 12 | fusion_f_cal | 0.010602 | базы в work/preds; _cal в паке (git) | только fusion_f_stats.npz; cal.npz есть | done 287: `train_fusion.py --name fusion_f --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 5` (1844s, USE_V4) | прогноз-артефакт (torch) — **в ночной очереди НЕ стоит**, единственная torch-дыра, которая ночью не закроется |
-| 13 | febspec2_cal | 0.008916 | базы в work/preds; _cal в паке (git) | бустер не сохраняется (без model_io); febspec2_cal.npz есть | done 623: `train_febspec2.py --name febspec2 --config auto --cohort 0.20 --threads 3` (429s; свой короткоисторический набор признаков собирает сам) | **воспроизводим из чистого клона** |
-| 14 | wklin_wk_cal | 0.002788 | work/preds; _cal в паке (git) | нет; wklin_wk_cal.npz есть | тот же запуск train_wklin.py, что и wklin (отдельно не получается) | **воспроизводим из чистого клона**; ночью 984+985 |
+| 2 | fusion_v3c_avg_cal | 0.228925 | базы fusion_v3c{42,555,7} только work/preds (локально); avg и _cal колонки в паке (git) | **ЗАКРЫТО НОЧЬЮ: .pt появились** — fusion_v3c{42,555,7}__p{1,2}_seed{42,555,7}.pt (6 файлов ~1.9MB, 02:18–02:50) + stats.npz + fusion_v3c_avg_cal.npz | done 981/982/983 (exit 0, 1009/759/758s): `train_fusion3.py --name fusion_v3cXX --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds XX --threads 4 --eval-every 492 --n-ch 12 --es-metric cal` → 985: merge_seeds.py + calibrate.py; per-seed val 1.707176/1.694070/1.697805, avg 1.698545, avg_cal **1.667839** (было 1.667810) | **воспроизводим из чистого клона — закрыто этой ночью** (ретрейн протокольный, НЕ побитовый: rms(лог) к пак-колонке 0.045) |
+| 3 | gseq_small_s42_cal | 0.108701 | **git**: work/colab/out/gseq_small_s42_{val,test}.parquet + json конфига | нет; gseq_small_s42_cal.npz есть | work/colab/gpu_seq.py (git) на Colab GPU; cfg L=112,d=96,2 слоя; cal_rmsle 1.698129 | **только предикт-артефакт в git** (нужен внешний GPU; веса не сохранялись) |
+| 4 | fusion_v3ctl_cal | 0.106124 | базы только work/preds; _cal в паке (git) | **ЗАКРЫТО НОЧЬЮ: .pt появились** — fusion_v3ctl__p{1,2}_seed42.pt (02:01/02:08) + stats.npz + cal.npz | done 980 (exit 0, 745s): `train_fusion3.py --name fusion_v3ctl --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 4 --eval-every 984 --n-ch 8` → 985 recal; val 1.689430 (было 1.691090), cal **1.669241** (было 1.670016). ВНИМАНИЕ: notes ретрейна говорят tab196 против tab203 в оригинале — базовые признаки со времён оригинала дрейфанули | **воспроизводим из чистого клона — закрыто этой ночью** (не побитово: rms(лог) 0.069) |
+| 5 | wklin (сырой) | 0.070987 | work/preds (перезаписан 02:50); замороженная реализация — колонка в паке (git); pre-night копия в work/preds/backup_pre_night/ | нет (ridge без model_io); wklin_cal.npz есть | done 984 (exit 0, **27s**): `train_wklin.py --name wklin` (USE_V2/3, POLARS_MAX_THREADS=3; пишет wklin+wklin_wk+wklin_base) | **воспроизводим из чистого клона — закрыто ночью**; ridge детерминирован, НО результат зависит от снапшота признаков: новый val 1.682802 против 1.684188, rms(лог) 0.090 |
+| 6 | weak_an_d_cal | 0.045493 | work/preds локально; _cal в паке (git) | **weak_an_d.txt + meta + cal.npz — есть** | done 9035 (123s): `train_weak.py --name weak_an_d --mech anchors --k-anchors 4 --sel-seed 77 --anchor-pool 0 --model lgb --objective log_mse --params '{tweedie 1.45, n_est 6000}'` + calibrate | **воспроизводим из чистого клона** (плюс бустер на диске) |
+| 7 | weak_ft_recency_cal | 0.043429 | work/preds локально; _cal в паке (git) | **weak_ft_recency.txt + meta + cal.npz — есть** | done 902: `train_weak.py --mech ftype --ftype recency --n-anchors 14 ...` + calibrate | **воспроизводим из чистого клона** |
+| 8 | behavonly_avg_cal | 0.041373 | базы behavonly{,_s1337,_s7} в work/preds; avg_cal в паке (git); avg пересобран 985-м — побитово тот же (rms 0) | s1337.txt и s7.txt есть; **бустер сида 42 отсутствует** (обучен до model_io); avg_cal.npz есть | done 260/776/777: `train_behavonly.py` (сид 42: `--n-anchors 14`, 214s; s1337/s7: 427/442s) → merge_seeds → calibrate | **воспроизводим из чистого клона** (LGB детерминирован; дешёвый ретрейн сида 42) |
+| 9 | lagd28 (сырой) | 0.035049 | work/preds, перегенерирован ночью (00:28/00:38, job 978) ДО пересборки пака — колонки пака совпадают с текущим файлом побитово (rms 0) | весов нет ПО ПОСТРОЕНИЮ (lag-TTA: обучение при предикте) | done 978 (exit 0, 787s): `lag_tta.py --prefix lagd --lags 0,14,28,42,56,70 --test --seed 42`; тест отдельно: 977 `--test-only 61` (171s). **975/976 с `--lags 0,28,42` падают (exit 1)** — рабочая только полная команда | **воспроизводим из чистого клона** (детерминированный LGB; регенерация подтверждена ночью). Действующий винтаж: tweedie cut2025-11-04 it=574, sole 1.744574 |
+| 10 | c_ts2_s42_cal | 0.033278 | базы в work/preds; _cal в паке (git) | бустеров нет (до model_io); **c_ts2_s42_cal.npz — единственная отсутствующая cal-таблица действующего состава** (виден в --stage check; восстановим calibrate.py за ~1 мин) | done 130 (303s): `train_gbdt.py --name c_ts2_s42 --model lgb --objective two_stage --n-anchors 14 --seed 42 --gap-days 30 --params '{leaves 127/255,...}'` + `calibrate.py --pred c_ts2_s42` | **воспроизводим из чистого клона** (ретрейн теперь сохранит __stage1/__stage2 бустеры) |
+| 11 | gseq_big_s42_cal | 0.024431 | **git**: work/colab/out/gseq_big_s42_{val,test}.parquet + json | нет; cal.npz есть | gpu_seq.py arm=big (L=364,d=256,6 слоёв); **обучение оборвано на step 4500/11736 (done:false), взят ckpt-avg** | **только предикт-артефакт в git**: точный повтор невозможен даже на GPU (обрыв не воспроизводится) |
+| 12 | fusion_f_cal | 0.010602 | базы в work/preds; _cal в паке (git) | только fusion_f_stats.npz, .pt НЕТ; cal.npz есть | done 287 (1844s): `train_fusion.py --name fusion_f --final --epochs 3 --batch 2048 --eval-batch 1024 --lr 1e-3 --seeds 42 --threads 5` (USE_V2/3/4). Требует тензоры work/seq2 — **удалены (~11 ГБ)**, пересборка `build_seq2.py` | **только предикт-артефакт в git** — единственная torch-дыра, НЕ закрытая ночью (в очереди 980–985 не стояла) |
+| 13 | febspec2_cal | 0.008916 | базы в work/preds; _cal в паке (git) | бустер не сохраняется (без model_io); febspec2_cal.npz есть | done 623 (429s): `train_febspec2.py --name febspec2 --config auto --cohort 0.20 --threads 3` (короткоисторические признаки собирает сам) | **воспроизводим из чистого клона** |
+| 14 | wklin_wk_cal | 0.002788 | work/preds; _cal в паке (git) | нет; wklin_wk_cal.npz есть | тот же запуск train_wklin.py (984+985) | **воспроизводим из чистого клона — закрыто ночью**; примечательно: пересчитан ПОБИТОВО (rms 0, val 1.731511 тот же) — wk-ветка не использует дрейфанувшие 203 базовых признака |
 
-## Суммарные веса по категориям (Σ|w| = 1.006117)
+## Суммарные веса по категориям (Σ|w| = 1.006117) — состояние ПОСЛЕ ночи
 
 | категория | члены | Σ вес | доля |
 |---|---|---|---|
-| воспроизводим из чистого клона (детерминированный ретрейн, скрипт+команда в git) | wklin, weak_an_d_cal, weak_ft_recency_cal, behavonly_avg_cal, lagd28, c_ts2_s42_cal, febspec2_cal, wklin_wk_cal | **0.281313** | 28.0% |
-| только предикт-артефакт в git — сегодня | kostya46_cal, gseq_small_s42_cal, gseq_big_s42_cal (внешние, 0.379153) + fusion_v3c_avg_cal, fusion_v3ctl_cal, fusion_f_cal (torch без весов, 0.345651) | **0.724804** | 72.0% |
-| — из них закрывается этой ночью (980–983 save_torch + 985 recal) | fusion_v3c_avg_cal + fusion_v3ctl_cal | **0.335049** | 33.3% |
-| — останется предикт-артефактом после ночи | kostya46_cal, gseq_small/big, fusion_f_cal | **0.389755** | 38.7% |
+| воспроизводим из чистого клона (скрипт+команда в git, вход генерится из train.parquet) | wklin, weak_an_d_cal, weak_ft_recency_cal, behavonly_avg_cal, lagd28, c_ts2_s42_cal, febspec2_cal, wklin_wk_cal + закрытые ночью fusion_v3c_avg_cal, fusion_v3ctl_cal | **0.616362** | 61.3% |
+| — из них закрыто этой ночью (980–985, exit 0, save_torch + recal) | fusion_v3c_avg_cal 0.228925, fusion_v3ctl_cal 0.106124, wklin 0.070987, wklin_wk_cal 0.002788 | 0.408824 | 40.6% |
+| только предикт-артефакт в git (обучение вне машины или невоспроизводимо в точности) | kostya46_cal 0.246021, gseq_small_s42_cal 0.108701, gseq_big_s42_cal 0.024431, fusion_f_cal 0.010602 | **0.389755** | 38.7% |
 | невоспроизводим вовсе | — | **0.000000** | 0% |
 
-Нижняя строка — главный итог: невоспроизводимых членов НЕТ. Все 14 (включая
-калиброванные версии) лежат колонками в git-паке `work/preds_pack/{val,test}_preds.parquet`,
-и бленд собирается из них с точностью 4e-07 без единого локального файла.
+Главный итог прежний: невоспроизводимых членов НЕТ — все 14 лежат колонками в
+git-паке `work/preds_pack/{val,test}_preds.parquet`, и бленд собирается из них с
+точностью 4e-07 без единого локального файла. Оговорка к категории «воспроизводим»:
+для torch-членов ретрейн протокольный, не побитовый, а .pt лежат в gitignored
+work/models — с чужой машины восстановима функция, но не действующая реализация;
+действующая реализация живёт только в паке.
 
-Разрез «есть ли веса модели на диске сейчас»: полные веса есть только у
-weak_an_d + weak_ft_recency (Σ 0.0889) и 2/3 сидов behavonly; у 0.72 веса бленда
-модельных весов нет нигде (у torch появятся утром). `work/models/` в .gitignore —
-даже сохранённые веса живут только на этой машине.
+## Замер дрейфа после ночных ретрейнов (эталон против текущих work/preds)
 
-## inference.py --stage check (запущен: лёгкий, exit=1 из-за нехваток; полный вывод в scratchpad)
+Бленд, собранный по winner-весам из ТЕКУЩИХ work/preds/*_val.parquet (после 980–985):
+**1.665770**, дрейф к эталону **+0.000123** (≈5.6 единиц шума 0.000022). Изменились
+ровно четыре члена: rms(лог, пак→текущий) fusion_v3ctl_cal 0.069, wklin 0.090,
+fusion_v3c_avg_cal 0.045, wklin_wk_cal 0.000; остальные десять — побитово нули.
+Сольные скоры изменившихся: ctl_cal 1.669241 (−0.0008), avg_cal 1.667839 (+0.00003),
+wklin 1.682802 (−0.0014). Источник расхождения не сиды, а снапшот базовых признаков
+(tab203→tab196 в notes ctl; wk-ветка без базовых признаков совпала побитово).
 
-- `--verify-blend` перечисляет расхождение с действующим отчётом: **12 членов только в
-  пакете, 6 только в отчёте** (kostya46_cal 0.246, gseq_small 0.109, gseq_big 0.024,
-  lagd28 0.035, fusion_f_cal 0.011, wklin_wk_cal 0.003), **8 весов разошлись**.
+## inference.py --stage check (перезапущен 21.08 19:0x: лёгкий, ~15с, exit=1 из-за нехваток; вывод в scratchpad/stage_check.out)
+
+- Пакет `final_submission/inference.py` собирает ДРУГОЙ бленд: захардкожен старый
+  winner на **25 базовых моделей** (замороженная отправка). `--verify-blend`:
+  **12 членов только в пакете, 6 только в отчёте** (kostya46_cal 0.246!,
+  gseq_small_s42_cal 0.109, gseq_big_s42_cal 0.024, lagd28 0.035, fusion_f_cal 0.011,
+  wklin_wk_cal 0.003), **8 весов разошлись** (напр. fusion_v3ctl_cal 0.151 против 0.106).
 - По старому пакетному бленду: готово 19/25 базовых (вклад 0.752 из 1.005), не хватает
-  11 артефактов, переобучение 5.8 ч на месте / 7.4 ч на чистой машине; seq2-тензоры
-  (11 ГБ, для seq2tr_f) удалены; отсутствуют c_ts2_s42_cal.npz, seq2tr_f_cal.npz,
-  hmmsim_cal.npz, twl_v7_cal.npz.
-
-## Что произойдёт этой ночью (важно для эталона)
-
-980–984 ПЕРЕЗАПИШУТ work/preds/fusion_v3ctl*, fusion_v3c{42,555,7}*, wklin* новой
-реализацией (у torch — не побитовой), 985 пересоберёт avg и калибровки. Эталон
-1.665647 после этого сместится: колонки пака и work/preds разойдутся до пересборки
-пака. Старая реализация останется только в закоммиченном паке.
+  11 артефактов; переобучение 5.8 ч на месте / 7.4 ч на чистой машине; seq2-тензоры
+  (11 ГБ) удалены; отсутствуют cal-таблицы c_ts2_s42, seq2tr_f, hmmsim, twl_v7.
 
 ## Рекомендации (по убыванию срочности)
 
-1. **Утром после 985**: пересобрать пак (`build_preds_pack.py`), перезапустить
-   `blend_reopt.py --save`, зафиксировать новый эталон в scores.tsv; до этого никакие
-   замеры margin/joint_gain со старым паком не смешивать с новыми preds.
-2. **Синхронизировать inference.py с действующим блендом**: перенести 14-членный
-   winner в BLEND_WEIGHTS/MEMBER_PARTS/BASES (появятся kostya46_cal, gseq_*, lagd28,
-   fusion_f_cal; у kostya46/gseq вход — предикт-артефакты из git, их надо описать как
-   persist="preds" с путями work_kostya/preds и work/colab/out). Пока это не сделано,
-   пакет воспроизводит старый 20-членный бленд, а не действующий.
-3. **Последняя torch-дыра**: поставить в очередь ретрейн fusion_f с save_torch
-   (1844s, вес 0.0106) — после ночи это единственный член, чью точную реализацию
-   нельзя восстановить локально из весов.
-4. **Дешёвые закрытия** (в дневную очередь, суммарно ~10 мин): c_ts2_s42 ретрейн
-   (303s, сохранит бустеры + восстановит отсутствующий c_ts2_s42_cal.npz),
-   behavonly сид 42 (214s, сохранит бустер).
-5. **Внешние члены (0.379 веса)**: попросить Костю сохранить бустеры kostya46 (или
-   зафиксировать окружение), а у gseq принять как данность — gseq_big принципиально
-   неповторим (оборванное обучение), защита — только parquet в git (уже есть).
-6. **Упаковка**: work/models в .gitignore; перед отгрузкой веса копируются в
-   final_submission/models (сейчас там только chain_test.npz) — после ночных
-   ретрейнов включить копи-шаг в финализацию.
+1. **Решить судьбу эталона**: пак (эталон 1.665647) заморожен на ПРЕ-ночной реализации,
+   текущие work/preds дают 1.665770. Либо пересобрать пак + `blend_reopt.py --save`
+   (эталон сместится, все старые замеры станут несравнимы), либо объявить пак
+   каноном и не подмешивать в него свежие файлы. До решения margin/joint_gain мерить
+   только против пака (они так и делают).
+2. **Синхронизировать inference.py с действующим блендом** — главная дыра: пакет не
+   содержит kostya46_cal (0.246 веса!), gseq_*, lagd28, fusion_f_cal, wklin_wk_cal.
+   У kostya46/gseq вход — предикт-артефакты из git (work_kostya/preds, work/colab/out).
+3. **Последняя torch-дыра — fusion_f (0.0106)**: поставить в очередь ретрейн с
+   save_torch (1844s + пересборка seq2 ~11 ГБ). После этого категория «предикт-артефакт»
+   останется только у внешних членов.
+4. **Дешёвые закрытия** (~10 мин суммарно): `calibrate.py --pred c_ts2_s42`
+   (восстановит единственную отсутствующую cal-таблицу состава), ретрейн c_ts2_s42
+   (303s, сохранит бустеры), behavonly сид 42 (214s, сохранит бустер).
+5. **Внешние члены (0.379 веса)**: попросить Костю сохранить бустеры kostya46 или
+   зафиксировать окружение; gseq_big принципиально неповторим (оборванное обучение) —
+   защита только parquet в git (уже есть).
+6. **lagd28**: зафиксировать рабочую команду регенерации (полный список лагов, job 978);
+   разобрать падение укороченной `--lags 0,28,42` (975/976, exit 1).
+7. **Упаковка**: work/models в .gitignore; перед отгрузкой скопировать веса (теперь
+   включая 8 ночных .pt) в final_submission/models — сейчас там только chain_test.npz.
 
-— Источники: blend_reopt.json (winner), work/queue/{979–985}.json + done/{130,260,287,
-623,776,777,832,833,835,851,902,978,9035}.json, scores.tsv, model_io.py (контракт
-имён), inference.py BASES/MEMBER_PARTS, reproduce_training.md, work_kostya/README.md,
-work/colab/out/*.json. Замеры: .venv/bin/python, полный вывод check —
-scratchpad/check_out.txt.
+— Источники: blend_reopt.json (winner), work/queue/done/{130,260,287,623,776,777,902,
+9035,975–985}.json, scores.tsv, model_io-контракт имён, inference.py BASES/MEMBER_PARTS,
+work_kostya/README.md, work/colab/README.md + out/*.json, work/preds/backup_pre_night/.
+Замеры: .venv/bin/python (polars+numpy, точная алгебра пары из README пака); вывод
+--stage check — scratchpad/stage_check.out.
