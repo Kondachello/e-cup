@@ -1,0 +1,33 @@
+{
+ "channel_sanity": {
+  "max|gmv-gmv_search-gmv_cat|": 5.275069270282984e-11,
+  "cat_share_all_data": 0.0735
+ },
+ "standalone_correctors": {
+  "aov_lastweek_only(+blend)": {
+   "oof_delta": -5.34e-05,
+   "top1pct_share": -4.917,
+   "top01pct_share": -1.525
+  },
+  "catshare_lastweek_only(+blend)": {
+   "oof_delta": -2.49e-05,
+   "top1pct_share": -18.612,
+   "top01pct_share": -2.45
+  },
+  "levels_only(+blend) [CLOSED class ref]": {
+   "oof_delta": -3.96e-05,
+   "top1pct_share": -10.212,
+   "top01pct_share": -2.283
+  },
+  "levels+P2step": {
+   "oof_delta": -0.0068146,
+   "top1pct_share": -0.518,
+   "top01pct_share": -0.213
+  }
+ },
+ "noise_floor_8_random_features": {
+  "oof_delta": 1.46e-05,
+  "top1pct_share": 40.691,
+  "top01pct_share": 6.503
+ }
+}

@@ -1,0 +1,95 @@
+--- work/kaggle/kaggle_seq.py	2026-08-21 20:44:56
++++ work/kaggle/kaggle_seq.py (patched: --encoder gru)	2026-08-22 01:59:54
+@@ -396,6 +396,9 @@
+     t2v_k = getattr(args, "time2vec", 0)
+     alibi = getattr(args, "time_bias", "none") == "alibi"
+     with_dt = getattr(args, "aux_dt", 0.0) > 0
++    enc_gru = getattr(args, "encoder", "tfm") == "gru"
++    assert not (enc_gru and (alibi or with_dt)), \
++        "--encoder gru: --time-bias/--aux-dt — механизмы внимания и порядка токенов тфм-пути"
+ 
+     class EventNet(nn.Module):
+         def __init__(self):
+@@ -406,12 +409,19 @@
+             self.pos = nn.Parameter(torch.zeros(1, lmax + 1, d))
+             nn.init.trunc_normal_(self.cls, std=0.02)
+             nn.init.trunc_normal_(self.pos, std=0.02)
+-            layer = nn.TransformerEncoderLayer(
+-                d_model=d, nhead=args.heads, dim_feedforward=args.ff, dropout=args.dropout,
+-                activation="gelu", batch_first=True, norm_first=True)
+-            self.enc = nn.TransformerEncoder(layer, num_layers=args.layers,
+-                                             norm=nn.LayerNorm(d),
+-                                             enable_nested_tensor=False)
++            self.gru = None
++            if enc_gru:   # рекуррентный энкодер ВМЕСТО трансформера; те же токены store
++                self.enc = None
++                self.gru = nn.GRU(d, d, num_layers=args.layers, batch_first=True,
++                                  dropout=args.dropout if args.layers > 1 else 0.0)
++            else:
++                layer = nn.TransformerEncoderLayer(
++                    d_model=d, nhead=args.heads, dim_feedforward=args.ff,
++                    dropout=args.dropout,
++                    activation="gelu", batch_first=True, norm_first=True)
++                self.enc = nn.TransformerEncoder(layer, num_layers=args.layers,
++                                                 norm=nn.LayerNorm(d),
++                                                 enable_nested_tensor=False)
+             blocks, prev = [], 3 * d
+             for hdim in (384, 256):
+                 blocks += [nn.Linear(prev, hdim), nn.GELU(), nn.LayerNorm(hdim),
+@@ -445,6 +455,27 @@
+                 t2v = torch.cat([t2v[..., :1], torch.sin(t2v[..., 1:])], dim=2)
+                 x = torch.cat([x, t2v * valid.unsqueeze(2)], dim=2)
+             h = self.proj(x)
++            if self.gru is not None:
++                # GRU по хронологии: токены store идут свежие->старые (валидность —
++                # префикс j<len; префиксность сохраняется и после разворота), поэтому
++                # разворачиваем каждый ряд к порядку старые->послед. состояние = свежайшее.
++                ln = valid.sum(dim=1)
++                j = torch.arange(L, device=h.device)
++                src = (ln.unsqueeze(1) - 1 - j).clamp(min=0)
++                hc = h.gather(1, src.unsqueeze(2).expand(-1, -1, h.shape[2]))
++                hc = hc * valid.unsqueeze(2)
++                packed = nn.utils.rnn.pack_padded_sequence(
++                    hc, ln.clamp(min=1).cpu(), batch_first=True, enforce_sorted=False)
++                out, hn = self.gru(packed)
++                out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True,
++                                                          total_length=L)
++                nz = (ln > 0).unsqueeze(1).to(out.dtype)
++                hmean = (out * valid.unsqueeze(2)).sum(dim=1) / ln.clamp(min=1).unsqueeze(1)
++                hlast = hn[-1] * nz                    # состояние на свежайшем событии
++                hmax = out.masked_fill(~valid.unsqueeze(2), -1e4).amax(dim=1) * nz
++                z = self.trunk(torch.cat([hlast, hmean, hmax], dim=1))
++                return (self.head_logit(z).squeeze(1), self.head_mu(z).squeeze(1),
++                        self.head_aux(z), self.head_bins(z), None)
+             h = torch.cat([self.cls.expand(B, 1, -1), h], dim=1) + self.pos
+             pad = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=feats.device),
+                              ~valid], dim=1)
+@@ -562,7 +593,7 @@
+         "cal_rmsle_file": sc_file, "curve": state["curve"],
+         **({"cal_rmsle_swa": swa_sc} if swa_sc is not None else {}),
+         "cfg": {k: getattr(args, k) for k in
+-                ("d", "layers", "heads", "ff", "lmax", "batch", "lr", "epochs")},
++                ("encoder", "d", "layers", "heads", "ff", "lmax", "batch", "lr", "epochs")},
+         **({"v2": v2} if v2 else {}),
+         "n_anchors": store.n_train, "done": state["step"] >= state["total"],
+         "minutes": (time.time() - state["t0"]) / 60}, indent=1))
+@@ -687,6 +718,9 @@
+                             dt_pred[m_dt], torch.log1p(gap)[m_dt])
+             opt.zero_grad(set_to_none=True)
+             scaler.scale(loss).backward()
++            if args.encoder == "gru":   # GRU без клипа взрывается (fp16 тем более);
++                scaler.unscale_(opt)    # у тфм-пути поведение не меняется ничем
++                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+             scaler.step(opt)
+             scaler.update()
+             sched.step()
+@@ -724,6 +758,9 @@
+     t.add_argument("--device", default="cuda:0")
+     t.add_argument("--threads", type=int, default=2, help="потоков CPU для смоука")
+     t.add_argument("--users", type=int, default=0, help="0 = все 250к; меньше — смоук")
++    t.add_argument("--encoder", choices=["tfm", "gru"], default="tfm",
++                   help="gru: GRU(d, --layers слоёв) по хронологии вместо трансформера; "
++                        "токены, потери, калибровка, выгрузки — без изменений")
+     t.add_argument("--d", type=int, default=256)
+     t.add_argument("--layers", type=int, default=6)
+     t.add_argument("--heads", type=int, default=8)

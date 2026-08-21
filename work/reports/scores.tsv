@@ -504,3 +504,9 @@ blend_opt	1.665357	re-optimised blend: lib=B_plus_cal(226) method=ridge_free alp
 tfm3b	1.670858	честный ретрейн tfm3 (якорь 378, тест без застоялости) от Кости М.; принят ingest_tfm3b.py
 tfm3b_cal	1.668667	binned log-shift calibration of tfm3b; holdout 1.671434->1.669250
 blend_opt	1.665344	re-optimised blend: lib=B_plus_cal(228) method=ridge_free alpha_rel=0.0003; OOF(5f by user)=1.665485; current mix val 1.667432; w={'tfm3b_cal': 0.1091, 'kostya46_cal': 0.1078, 'kostya46_avg2_cal': 0.0955, 'tfm3b_pre2_cal': 0.0907, 'fusion_v3c_avg_cal': 0.0853, 'fusion_v3ctl_cal': 0.085, 'gseq_small_s42_cal': 0.0751, 'fusion_v3c42_cal': 0.0725, 'wklin': 0.0439, 'weak_an_d_cal': 0.0405, 'tfm3_stale28': 0.0379, 'weak_ft_recency_cal': 0.0354, 'behavonly_avg_cal': 0.0297, 'hz_v1_pb': 0.0266, 'c_ts2_s42_cal': 0.0153, 'fusion_v3c7_cal': 0.015, 'fusion_f_cal': 0.0134, 'c_ts2_s7_cal': 0.0119, 'fusion_v3_cal': 0.0115, 'febspec2_cal': 0.0048}
+kalman_r2	1.714244	kalman mu+AR(1) по 12 окнам x30д, БЕЗ признаков; p=0.4476 q=0.1779 lam=0.7264
+tsb_r2	2.106544	TSB intermittent demand, ap=0.02 az=0.3 выбраны на DEC31; 30*p*z, без признаков
+hawkes_r2	1.878159	hawkes event-stream: alpha=0.65 beta=1/3.5d выбраны на DEC31; все 409 дней, интервалы вместо матрицы
+hz_fixsmoke_surv	1.728035	daily hazard surv: days=30 stride=3 uf=0.05 trees=60 scen=6
+hz_fixsmoke_pb	1.729047	daily hazard pb: days=30 stride=3 uf=0.05 trees=60 scen=6
+hz_fixsmoke_mc	1.850146	daily hazard mc: days=30 stride=3 uf=0.05 trees=60 scen=6

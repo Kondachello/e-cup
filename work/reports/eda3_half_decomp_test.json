@@ -1,0 +1,25 @@
+{
+ "D1": {
+  "va": {
+   "direct": 1.80261,
+   "halves": 1.82831,
+   "halves_cal": 1.80868
+  },
+  "va_concentration": {
+   "top1": 0.044,
+   "top01": 0.037
+  },
+  "ta": {
+   "direct": 1.7119,
+   "halves": 1.73102,
+   "halves_cal": 1.71487
+  },
+  "c9": {
+   "direct": 1.80302,
+   "halves": 1.82853,
+   "halves_cal": 1.80827
+  }
+ },
+ "D2_half_resid_corr_given_blend": 0.1541,
+ "D2_buyers_only": -0.1767
+}
