@@ -25,7 +25,7 @@
 валидации как вход, и её скор стал бы завышенным.
 """
 from __future__ import annotations
-import argparse, subprocess, sys, time
+import argparse, os, subprocess, sys, time
 from pathlib import Path
 
 ARCH = ["--arch", "transformer", "--lr", "7e-4", "--channels", "192", "--layers", "4",
@@ -37,8 +37,12 @@ ARCH = ["--arch", "transformer", "--lr", "7e-4", "--channels", "192", "--layers"
 def run(cmd, logfile):
     print("  $ " + " ".join(str(c) for c in cmd), flush=True)
     with open(logfile, "w", encoding="utf-8", errors="replace") as f:
+        # PYTHONIOENCODING обязателен: на Windows дочерний питон пишет в трубу
+        # в кодировке консоли (cp1251), а мы читаем как utf-8 — русский текст в
+        # логах превращается в кракозябры, и разбирать ночной прогон нечем.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, encoding="utf-8", errors="replace", bufsize=1)
+                             text=True, encoding="utf-8", errors="replace", bufsize=1, env=env)
         for line in p.stdout:
             sys.stdout.write(line); sys.stdout.flush(); f.write(line)
         return p.wait()
@@ -63,23 +67,25 @@ def main() -> int:
 
     sfx = "_smoke" if a.smoke else ""
     lm, pm, fm = (0.7, 0.7, 0.7) if a.smoke else (a.long_minutes, a.pre_minutes, a.ft_minutes)
-    extra = ["--steps", "400", "--eval-every", "100"] if a.smoke else []
+    steps_long = ["--steps", "400"] if a.smoke else ["--steps", "120000"]
+    extra = ["--eval-every", "100"] if a.smoke else []
     t_long, t_pre, t_ft = f"tfm2_s{a.seed}_long{sfx}", f"pre378{sfx}.pt", f"tfm2_s{a.seed}_pre{sfx}"
 
     plan = [
         ("длинное обучение", preds / f"{t_long}_val.parquet",
          [py, str(seq/"train_tcn.py"), "--data", str(data), *ARCH, "--es-metric", "cal",
-          "--minutes", str(lm), "--steps", "120000", "--seed", str(a.seed),
+          "--minutes", str(lm), *steps_long, "--seed", str(a.seed),
           "--tag", t_long, "--export", str(preds), "--no-plots", *extra]),
         ("самообучение", root / t_pre,
          [py, str(seq/"pretrain.py"), "--data", str(data), "--minutes", str(pm),
           "--max-pre-anchor", "378", "--channels", "192", "--layers", "4", "--heads", "4",
           "--dropout", "0.0", "--batch", "512", "--min-anchor", "30",
-          "--out", str(root / t_pre), *extra]),
+          "--out", str(root / t_pre), *(["--steps", "400"] if a.smoke else []), *extra]),
         ("дообучение с предобучения", preds / f"{t_ft}_val.parquet",
          [py, str(seq/"train_tcn.py"), "--data", str(data), *ARCH, "--es-metric", "cal",
           "--minutes", str(fm), "--seed", str(a.seed), "--tag", t_ft,
-          "--init-from", str(root / t_pre), "--export", str(preds), "--no-plots", *extra]),
+          "--init-from", str(root / t_pre), "--export", str(preds), "--no-plots",
+          *(["--steps", "400"] if a.smoke else []), *extra]),
     ]
 
     total = lm + pm + fm
