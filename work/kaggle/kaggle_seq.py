@@ -32,6 +32,34 @@
     # параллельно на второй карте: --name kevf_s1337 --seed 1337 --device cuda:1
 Выход: <ROOT>/out/ИМЯ_val.parquet и ИМЯ_test.parquet (user_id, pred в исходном GMV) —
 ровно то, что принимает work/colab/ingest.py.
+
+V2-ФЛАГИ (по умолчанию ВСЕ выключены; с выключенными флагами поведение файла побитово
+равно v1 — те же RNG-потоки, тот же state_dict, тот же формат чекпойнта, поэтому
+прогон v1 на Kaggle продолжается этим файлом без изменений):
+  --time-bias alibi   аддитивный bias к логитам внимания −w_h·log1p(|Δдней(i,j)|);
+                      w_h ≥ 0 — обучаемый скаляр на голову (softplus, init ≈ 0.1)
+  --time2vec K        Time2Vec(K) от числа дней до якоря (линейный член + K−1 синусов
+                      с обучаемыми частотами) конкатенируется ко входу проекции
+  --event-dropout p   train-аугментация: выброс токенов с вероятностью p, ≥1 остаётся;
+                      на eval выключено
+  --interval-jitter j train-аугментация: признак интервала до предыдущего события
+                      умножается на exp(j·N(0,1)); календарь не трогается; на eval выключено
+  --mono-w λ          штраф монотонности горизонтов в log1p-пространстве
+                      relu(ŷ7−ŷ14)+relu(ŷ14−ŷ30) с весом λ
+  --aux-dt w          вспомогательная потокенная регрессия log1p(Δдней до следующего
+                      активного дня) с весом w (последний по времени токен маскируется)
+  --swa-k K           при каждой выгрузке дополнительно усредняются ВЕСА последних K
+                      выгрузок -> ИМЯ_swa_val.parquet / ИМЯ_swa_test.parquet
+
+ЧТО ВКЛЮЧАТЬ НА ВТОРОЙ СЕССИИ: тёплый старт с чекпойнта v1 плюс
+    --time-bias alibi --time2vec 8 --event-dropout 0.05 --mono-w 0.1 --swa-k 3
+--resume сам поймёт, что формы не совпадают: совпадающие тензоры копируются, новые
+столбцы расширенной проекции обнуляются (стартовый выход сети равен v1), новые параметры
+остаются со свежей инициализацией, оптимизатор и расписание начинаются заново. Чтобы не
+затирать выгрузки v1, чекпойнт копируется под новое имя:
+    cp ИМЯ.ckpt ИМЯ_v2.ckpt
+    python kaggle_seq.py train --name ИМЯ_v2 --seed 42 --device cuda:0 --resume \
+        --time-bias alibi --time2vec 8 --event-dropout 0.05 --mono-w 0.1 --swa-k 3
 """
 from __future__ import annotations
 
@@ -262,8 +290,13 @@ class GpuStore:
         self.device = device
         self.users = users
 
-    def batch(self, a_ids, u_ids, lmax: int):
-        """a_ids, u_ids: int64-тензоры [B] на устройстве -> (feats [B,L,F], valid [B,L])."""
+    def batch(self, a_ids, u_ids, lmax: int, ev_drop: float = 0.0, jitter: float = 0.0):
+        """a_ids, u_ids: int64-тензоры [B] на устройстве ->
+        (feats [B,L,F], valid [B,L], dt_anchor [B,L] — дней от события до якоря).
+
+        ev_drop/jitter — train-аугментации (v2, на eval не передаются): случайный выброс
+        токенов с сохранением ≥1 и лог-нормальный джиттер признака интервала. При нулях
+        ни одного обращения к RNG и ни одной новой операции — путь побитово v1."""
         import torch
         e = self.ends[a_ids, u_ids]
         s = self.starts[a_ids, u_ids]
@@ -272,6 +305,14 @@ class GpuStore:
         valid = j.unsqueeze(0) < ln.unsqueeze(1)            # [B, L]
         src = (e - 1).unsqueeze(1) - j                      # обратный порядок
         src = src.masked_fill(~valid, 0)
+        if ev_drop > 0:   # выброс токенов: оставшиеся уплотняются к началу, порядок прежний
+            keep = (torch.rand(valid.shape, device=self.device) >= ev_drop) & valid
+            keep[:, 0] |= valid[:, 0] & (keep.sum(dim=1) == 0)   # у непустых остаётся ≥1
+            order = torch.argsort((~keep).to(torch.int8), dim=1, stable=True)
+            src = src.gather(1, order)
+            ln = keep.sum(dim=1)
+            valid = j.unsqueeze(0) < ln.unsqueeze(1)
+            src = src.masked_fill(~valid, 0)
         day = self.day[src].to(torch.float32)               # [B, L]
         ch = self.ch[src].to(torch.float32) * self.scale    # [B, L, C]
 
@@ -280,6 +321,9 @@ class GpuStore:
         prev = torch.cat([day[:, 1:], day[:, :1]], dim=1)   # j+1 = предыдущее по времени
         has_prev = (j + 1).unsqueeze(0) < ln.unsqueeze(1)
         dt_prev = torch.where(has_prev, day - prev, day - wstart).clamp_(min=0)
+        if jitter > 0:    # лог-нормальный множитель к интервалу; календарь не трогаем
+            dt_prev = dt_prev * torch.exp(jitter * torch.randn(dt_prev.shape,
+                                                               device=self.device))
         dt_anchor = (a_day - day).clamp_(min=0)
         wd = ((day + 2) % 7).long()                         # 2025-01-01 — среда
         wd1h = torch.nn.functional.one_hot(wd, 7).to(torch.float32)
@@ -292,23 +336,72 @@ class GpuStore:
             wd1h,
             torch.sin(phase).unsqueeze(2), torch.cos(phase).unsqueeze(2),
         ], dim=2)
-        return feats * valid.unsqueeze(2), valid
+        return feats * valid.unsqueeze(2), valid, dt_anchor * valid
 
     F_DIM = C + 3 + 7 + 2
 
 
 # ---------------- модель ----------------
 
+def _avg_states(states: list[dict]) -> dict:
+    """Среднее весов по списку state_dict (для --swa-k). Нефлоат-тензоры (если появятся)
+    берутся у последней точки, а не усредняются — образец train_fusion3._avg_states."""
+    import torch
+    out = {}
+    for k, v in states[-1].items():
+        if torch.is_floating_point(v):
+            acc = torch.zeros_like(v, dtype=torch.float64)
+            for s in states:
+                acc += s[k].double()
+            out[k] = (acc / len(states)).to(v.dtype)
+        else:
+            out[k] = v.clone()
+    return out
+
+
+def _warm_load(model, sd: dict) -> None:
+    """Тёплый старт v1-чекпойнта в v2-конфигурацию (вызывается ТОЛЬКО когда строгая
+    загрузка не прошла): совпадающие по форме тензоры копируются; у Linear-весов,
+    расширенных по входу (time2vec), старые столбцы копируются, новые обнуляются —
+    стартовый выход сети равен выходу v1. Новые параметры (time_bias, aux-dt)
+    остаются со свежей инициализацией."""
+    import torch
+    own = model.state_dict()
+    copied, skipped = 0, []
+    with torch.no_grad():
+        for k, v in sd.items():
+            if k not in own:
+                skipped.append(k)
+                continue
+            t = own[k]
+            if t.shape == v.shape:
+                t.copy_(v)
+                copied += 1
+            elif (t.dim() == 2 and v.dim() == 2 and t.shape[0] == v.shape[0]
+                  and t.shape[1] > v.shape[1]):
+                t.zero_()
+                t[:, :v.shape[1]].copy_(v)
+                copied += 1
+            else:
+                skipped.append(k)
+    print(f"тёплый старт: скопировано {copied} тензоров"
+          + (f", пропущено {skipped}" if skipped else ""), flush=True)
+
+
 def build_model(args, device):
     import torch
     import torch.nn as nn
 
     d, lmax = args.d, args.lmax
+    t2v_k = getattr(args, "time2vec", 0)
+    alibi = getattr(args, "time_bias", "none") == "alibi"
+    with_dt = getattr(args, "aux_dt", 0.0) > 0
 
     class EventNet(nn.Module):
         def __init__(self):
             super().__init__()
-            self.proj = nn.Sequential(nn.Linear(GpuStore.F_DIM, d), nn.LayerNorm(d))
+            self.proj = nn.Sequential(nn.Linear(GpuStore.F_DIM + t2v_k, d),
+                                      nn.LayerNorm(d))
             self.cls = nn.Parameter(torch.zeros(1, 1, d))
             self.pos = nn.Parameter(torch.zeros(1, lmax + 1, d))
             nn.init.trunc_normal_(self.cls, std=0.02)
@@ -329,21 +422,60 @@ def build_model(args, device):
             self.head_mu = nn.Linear(prev, 1)      # ожидание log1p(GMV) при GMV > 0
             self.head_aux = nn.Linear(prev, 2)     # горизонты 7 и 14 дней
             self.head_bins = nn.Linear(prev, 32)   # распределение log1p по корзинам
+            # v2: новые параметры создаются СТРОГО после v1-шных и только при включённых
+            # флагах — с выключенными флагами поток RNG инициализации и state_dict
+            # побитово совпадают с v1 (чекпойнт-совместимость прогона на Kaggle).
+            self.time_w = None
+            if alibi:      # softplus(-2.2522) ~= 0.1 на голову; RNG не трогается
+                self.time_w = nn.Parameter(torch.full(
+                    (args.heads,), float(np.log(np.expm1(0.1)))))
+            if t2v_k > 0:  # линейный член 1/WINDOW + синусы с периодами 2..365 дней
+                per = np.geomspace(2.0, 365.0, max(t2v_k - 1, 1))[:t2v_k - 1]
+                self.t2v_w = nn.Parameter(torch.cat([
+                    torch.tensor([1.0 / WINDOW], dtype=torch.float32),
+                    torch.tensor(2 * np.pi / per, dtype=torch.float32)]))
+                self.t2v_b = nn.Parameter(torch.zeros(t2v_k))
+            self.head_dt = nn.Linear(d, 1) if with_dt else None   # log1p(Δдо след. дня)
 
-        def forward(self, feats, valid):
-            B = feats.shape[0]
-            h = self.proj(feats)
+        def forward(self, feats, valid, dta=None):
+            B, L = valid.shape
+            x = feats
+            if t2v_k > 0:  # Time2Vec от дней до якоря: [w0*t+b0, sin(w_i*t+b_i)...]
+                t2v = self.t2v_w * dta.unsqueeze(2) + self.t2v_b
+                t2v = torch.cat([t2v[..., :1], torch.sin(t2v[..., 1:])], dim=2)
+                x = torch.cat([x, t2v * valid.unsqueeze(2)], dim=2)
+            h = self.proj(x)
             h = torch.cat([self.cls.expand(B, 1, -1), h], dim=1) + self.pos
             pad = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=feats.device),
                              ~valid], dim=1)
-            h = self.enc(h, src_key_padding_mask=pad)
+            if self.time_w is None:
+                h = self.enc(h, src_key_padding_mask=pad)   # путь v1, побитово
+            else:                         # ALiBi по времени: −w_h·log1p(|Δдней(i,j)|)
+                w = torch.nn.functional.softplus(self.time_w)          # [H] ≥ 0
+                dist = torch.log1p((dta.unsqueeze(2) - dta.unsqueeze(1)).abs())
+                bias = -w.view(1, -1, 1, 1) * dist.unsqueeze(1)        # [B, H, L, L]
+                attn_bias = bias.new_zeros(B, w.shape[0], L + 1, L + 1)
+                attn_bias[:, :, 1:, 1:] = bias                         # CLS без штрафа
+                # паддинг вносится в тот же float-bias (столбцы -inf): один mask вместо
+                # пары mask+key_padding_mask разных типов, у которой torch ругается;
+                # in-place — тензор [B,H,L+1,L+1] большой, вторая копия не нужна
+                attn_bias.masked_fill_(pad.view(B, 1, 1, L + 1), float("-inf"))
+                attn_bias = attn_bias.reshape(-1, L + 1, L + 1)
+                if feats.is_cuda and torch.is_autocast_enabled():
+                    amp_dt = (torch.get_autocast_dtype("cuda")
+                              if hasattr(torch, "get_autocast_dtype")
+                              else torch.get_autocast_gpu_dtype())
+                    attn_bias = attn_bias.to(amp_dt)
+                h = self.enc(h, mask=attn_bias)
             ev = h[:, 1:]
             cnt = valid.sum(dim=1, keepdim=True).clamp(min=1)
             hmean = (ev * valid.unsqueeze(2)).sum(dim=1) / cnt
             hlast = ev[:, 0] * (valid[:, :1]).to(ev.dtype)          # свежайшее событие
             z = self.trunk(torch.cat([h[:, 0], hmean, hlast], dim=1))
+            dt_pred = (self.head_dt(ev).squeeze(2) if self.head_dt is not None
+                       else None)
             return (self.head_logit(z).squeeze(1), self.head_mu(z).squeeze(1),
-                    self.head_aux(z), self.head_bins(z))
+                    self.head_aux(z), self.head_bins(z), dt_pred)
 
     m = EventNet().to(device)
     print(f"модель: Lmax={lmax} d={d} слоёв={args.layers} "
@@ -360,9 +492,9 @@ def predict_log(model, store, a_id: int, device, batch: int) -> np.ndarray:
     with torch.no_grad():
         for s_ in range(0, n, batch):
             u = torch.arange(s_, min(s_ + batch, n), device=device)
-            feats, valid = store.batch(a[:len(u)], u, model.pos.shape[1] - 1)
+            feats, valid, dta = store.batch(a[:len(u)], u, model.pos.shape[1] - 1)
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-                logit, mu, _, _ = model(feats, valid)
+                logit, mu = model(feats, valid, dta)[:2]
             out[s_:s_ + len(u)] = (torch.sigmoid(logit.float())
                                    * torch.clamp(mu.float(), min=0)).cpu().numpy()
     model.train()
@@ -376,9 +508,21 @@ def epoch_order(seed: int, ep: int, n_anchors: int, users: int) -> np.ndarray:
     return r.permutation(n_anchors * users)
 
 
+V2_FLAGS = ("time_bias", "time2vec", "event_dropout", "interval_jitter",
+            "mono_w", "aux_dt", "swa_k")
+
+
+def _v2_cfg(args) -> dict:
+    """Ненулевые v2-флаги; пустой словарь == чистый v1 (json/чекпойнт не меняются)."""
+    return {k: getattr(args, k) for k in V2_FLAGS
+            if getattr(args, k) not in ("none", 0, 0.0)}
+
+
 def dump(model, store, args, state, device):
     """Val И test с ОДНИХ текущих весов, оба в скользящее среднее последних K выгрузок.
-    Записываются усреднённые файлы + контрольная точка для продолжения."""
+    Записываются усреднённые файлы + контрольная точка для продолжения.
+    При --swa-k дополнительно: среднее ВЕСОВ последних K выгрузок (тех же точек, что
+    усредняются предсказаниями) -> ИМЯ_swa_val.parquet / ИМЯ_swa_test.parquet."""
     import torch
     pv = predict_log(model, store, len(store.anchors) - 2, device, args.eval_batch)
     pt = predict_log(model, store, len(store.anchors) - 1, device, args.eval_batch)
@@ -388,6 +532,16 @@ def dump(model, store, args, state, device):
     pt_avg = np.mean(np.stack(state["pt_hist"]), axis=0)
     sc_file = cal_rmsle_2fold(pv_avg, state["ly_val"], state["y_val"], state["half"])
 
+    swa_v = swa_t = swa_sc = None
+    if args.swa_k > 0:   # SWA: подменить веса средними, предсказать, вернуть текущие
+        cur = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        state["w_hist"] = (state["w_hist"] + [cur])[-args.swa_k:]
+        model.load_state_dict(_avg_states(state["w_hist"]))
+        swa_v = predict_log(model, store, len(store.anchors) - 2, device, args.eval_batch)
+        swa_t = predict_log(model, store, len(store.anchors) - 1, device, args.eval_batch)
+        model.load_state_dict(cur)   # обучение продолжается с прежних весов
+        swa_sc = cal_rmsle_2fold(swa_v, state["ly_val"], state["y_val"], state["half"])
+
     import polars as pl
     OUT.mkdir(parents=True, exist_ok=True)
     uid = np.load(STORE / "user_ids.npy")[:store.users]
@@ -395,13 +549,21 @@ def dump(model, store, args, state, device):
                  ).write_parquet(OUT / f"{args.name}_val.parquet")
     pl.DataFrame({"user_id": uid, "pred": np.expm1(np.clip(pt_avg, 0, None))}
                  ).write_parquet(OUT / f"{args.name}_test.parquet")
+    if swa_v is not None:
+        pl.DataFrame({"user_id": uid, "pred": np.expm1(np.clip(swa_v, 0, None))}
+                     ).write_parquet(OUT / f"{args.name}_swa_val.parquet")
+        pl.DataFrame({"user_id": uid, "pred": np.expm1(np.clip(swa_t, 0, None))}
+                     ).write_parquet(OUT / f"{args.name}_swa_test.parquet")
+    v2 = _v2_cfg(args)   # в json и чекпойнт v2-поля попадают только при включённых флагах
     (OUT / f"{args.name}.json").write_text(json.dumps({
         "arm": "event", "seed": args.seed, "step": state["step"], "total": state["total"],
         "cal_rmsle_last": state["curve"][-1] if state["curve"] else None,
         "cal_rmsle_best": min(state["curve"]) if state["curve"] else None,
         "cal_rmsle_file": sc_file, "curve": state["curve"],
+        **({"cal_rmsle_swa": swa_sc} if swa_sc is not None else {}),
         "cfg": {k: getattr(args, k) for k in
                 ("d", "layers", "heads", "ff", "lmax", "batch", "lr", "epochs")},
+        **({"v2": v2} if v2 else {}),
         "n_anchors": store.n_train, "done": state["step"] >= state["total"],
         "minutes": (time.time() - state["t0"]) / 60}, indent=1))
     torch.save({"model": model.state_dict(), "opt": state["opt"].state_dict(),
@@ -409,10 +571,13 @@ def dump(model, store, args, state, device):
                 "scaler": state["scaler"].state_dict(), "step": state["step"],
                 "curve": state["curve"],
                 "pv_hist": np.stack(state["pv_hist"]).astype(np.float32),
-                "pt_hist": np.stack(state["pt_hist"]).astype(np.float32)},
+                "pt_hist": np.stack(state["pt_hist"]).astype(np.float32),
+                **({"w_hist": state["w_hist"]} if args.swa_k > 0 else {})},
                ROOT / f"{args.name}.ckpt")
     print(f"  ВЫГРУЗКА на шаге {state['step']}: скор файла (среднее {len(state['pv_hist'])}"
-          f" выгрузок) {sc_file:.6f}", flush=True)
+          f" выгрузок) {sc_file:.6f}"
+          + (f", swa по {len(state['w_hist'])} весам {swa_sc:.6f}"
+             if swa_sc is not None else ""), flush=True)
 
 
 def cmd_train(args) -> None:
@@ -456,18 +621,30 @@ def cmd_train(args) -> None:
         milestones=[warm])
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
 
-    state = dict(step=0, total=total, curve=[], pv_hist=[], pt_hist=[], opt=opt,
-                 sched=sched, scaler=scaler, y_val=y_val, ly_val=ly_val, half=half,
-                 t0=time.time())
+    state = dict(step=0, total=total, curve=[], pv_hist=[], pt_hist=[], w_hist=[],
+                 opt=opt, sched=sched, scaler=scaler, y_val=y_val, ly_val=ly_val,
+                 half=half, t0=time.time())
     ck_path = ROOT / f"{args.name}.ckpt"
     if args.resume and ck_path.exists():
         st = torch.load(ck_path, map_location=device, weights_only=False)
-        model.load_state_dict(st["model"]); opt.load_state_dict(st["opt"])
-        sched.load_state_dict(st["sched"]); scaler.load_state_dict(st["scaler"])
-        state["step"] = int(st["step"]); state["curve"] = list(st["curve"])
-        state["pv_hist"] = [a for a in np.asarray(st["pv_hist"])]
-        state["pt_hist"] = [a for a in np.asarray(st["pt_hist"])]
-        print(f"продолжаю с шага {state['step']}/{total}", flush=True)
+        try:
+            model.load_state_dict(st["model"])
+            exact = True
+        except RuntimeError:   # v2-флаги добавили/расширили параметры -> тёплый старт
+            _warm_load(model, st["model"])
+            exact = False
+        if exact:
+            opt.load_state_dict(st["opt"])
+            sched.load_state_dict(st["sched"]); scaler.load_state_dict(st["scaler"])
+            state["step"] = int(st["step"]); state["curve"] = list(st["curve"])
+            state["pv_hist"] = [a for a in np.asarray(st["pv_hist"])]
+            state["pt_hist"] = [a for a in np.asarray(st["pt_hist"])]
+            state["w_hist"] = [{k: v.cpu() for k, v in d.items()}
+                               for d in st.get("w_hist", [])]
+            print(f"продолжаю с шага {state['step']}/{total}", flush=True)
+        else:
+            print("оптимизатор, расписание и истории выгрузок начаты заново "
+                  "(тёплый старт весов, шаг 0)", flush=True)
 
     print(f"срезов {n_tr}, пользователей {users:,}, шагов за эпоху {steps_per_epoch}, "
           f"всего {total}; замер каждые {args.eval_every}, выгрузка каждые "
@@ -481,11 +658,12 @@ def cmd_train(args) -> None:
             if len(idx) < 8:
                 continue
             a_ids, u_ids = idx // users, idx % users
-            feats, valid = store.batch(a_ids, u_ids, args.lmax)
+            feats, valid, dta = store.batch(a_ids, u_ids, args.lmax,
+                                            args.event_dropout, args.interval_jitter)
             yb = tg[a_ids, u_ids]                              # [B, 3] log1p
             bb = (yb[:, 0] > 0).float()
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-                logit, mu, aux, bins = model(feats, valid)
+                logit, mu, aux, bins, dt_pred = model(feats, valid, dta)
                 bce = F.binary_cross_entropy_with_logits(logit, bb)
                 pos = bb > 0
                 mse_pos = (F.mse_loss(mu[pos], yb[pos, 0]) if pos.any()
@@ -494,6 +672,19 @@ def cmd_train(args) -> None:
                 l_bin = F.cross_entropy(bins, torch.bucketize(yb[:, 0].contiguous(),
                                                               bin_edges))
                 loss = args.bce_w * bce + mse_pos + args.aux_w * l_aux + args.bin_w * l_bin
+                if args.mono_w > 0:   # монотонность горизонтов в log1p: ŷ7 ≤ ŷ14 ≤ ŷ30
+                    y30l = torch.sigmoid(logit) * torch.clamp(mu, min=0)
+                    l_mono = (F.relu(aux[:, 0] - aux[:, 1])
+                              + F.relu(aux[:, 1] - y30l)).mean()
+                    loss = loss + args.mono_w * l_mono
+                if dt_pred is not None:   # log1p(Δдней до следующего активного дня);
+                    m_dt = valid.clone()  # свежайший токен (j=0) маскируется: цель за якорем
+                    m_dt[:, 0] = False
+                    if m_dt.any():
+                        gap = (dta - torch.cat([dta[:, :1], dta[:, :-1]],
+                                               dim=1)).clamp(min=0)
+                        loss = loss + args.aux_dt * F.mse_loss(
+                            dt_pred[m_dt], torch.log1p(gap)[m_dt])
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.step(opt)
@@ -554,6 +745,21 @@ def main() -> None:
                    help="сколько последних выгрузок усреднять в файлах val и test")
     t.add_argument("--max-steps", type=int, default=0, help="обрезать бюджет (смоук)")
     t.add_argument("--resume", action="store_true")
+    # v2-флаги (см. докстринг): по умолчанию выключены, поведение тогда побитово v1
+    t.add_argument("--time-bias", choices=["none", "alibi"], default="none",
+                   help="alibi: bias внимания −w_h·log1p(|Δдней|), w_h≥0 обучаемый")
+    t.add_argument("--time2vec", type=int, default=0,
+                   help="K>0: Time2Vec(K) от дней до якоря добавляется ко входу проекции")
+    t.add_argument("--event-dropout", type=float, default=0.0,
+                   help="train-аугментация: выброс токенов с вероятностью p, ≥1 остаётся")
+    t.add_argument("--interval-jitter", type=float, default=0.0,
+                   help="train-аугментация: интервал до пред. события *= exp(j·N(0,1))")
+    t.add_argument("--mono-w", type=float, default=0.0,
+                   help="вес штрафа relu(ŷ7−ŷ14)+relu(ŷ14−ŷ30) в log1p")
+    t.add_argument("--aux-dt", type=float, default=0.0,
+                   help="вес регрессии log1p(Δдней до следующего активного дня)")
+    t.add_argument("--swa-k", type=int, default=0,
+                   help="усреднять веса последних K выгрузок -> ИМЯ_swa_{val,test}.parquet")
     t.set_defaults(fn=cmd_train)
 
     args = ap.parse_args()
