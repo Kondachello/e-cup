@@ -286,8 +286,9 @@ def rmsle_from_log(pred_log, true_log):
     return float(torch.sqrt(((pred_log.clamp_min(0) - true_log)**2).mean()))
 
 def main(a, st=None):
-    global VAL_ANCHOR, MAX_TR_ANCHOR
+    global VAL_ANCHOR, MAX_TR_ANCHOR, TEST_ANCHOR
     VAL_ANCHOR = a.val_anchor
+    if a.test_anchor: TEST_ANCHOR = a.test_anchor
     # По умолчанию зазор 30 дней: таргет обучения не залезает в валидацию.
     # --max-tr-anchor отвязывает границу — нужно для переобучения на train+val
     # перед предсказанием теста (контракт exp_lib). Зазор при этом нарушается
@@ -316,7 +317,12 @@ def main(a, st=None):
     W = {'y30':1.0, 'y7':a.aux, 'y14':a.aux, 'ord30':a.aux, 'act30':a.aux, 'buy':a.aux}
 
     # валидация фиксирована: те же юзеры, что и в тесте
-    val_u = torch.arange(st.n_u)[st.valid[:, VAL_ANCHOR]]
+    # Маска valid_anchor на раннем якоре отсеивает часть юзеров (на 2025-09-15
+    # проходило 0.9086). Для выгрузки в бленд нужны все 250000 строк, иначе
+    # координатору нечего джойнить, поэтому --val-all маску обходит.
+    val_u = (torch.arange(st.n_u) if a.val_all
+             else torch.arange(st.n_u)[st.valid[:, VAL_ANCHOR]])
+    if a.val_all: print('--val-all: маска якоря обойдена, берём всех юзеров', flush=True)
     if a.val_users and a.val_users < len(val_u):        # сид фиксирован: иначе прогоны несравнимы
         g = torch.Generator().manual_seed(42)
         val_u = val_u[torch.randperm(len(val_u), generator=g)[:a.val_users]]
@@ -408,7 +414,10 @@ def main(a, st=None):
     if a.cal_fixed:
         # при нарушенном зазоре валидация подсматривает, подбирать усадку на ней нельзя
         cal = a.cal_fixed
-        print(f'усадка задана флагом: {cal} (подбор на валидации отключён)')
+        # bestc нужен для return в конце main(): sweep.py читает это значение
+        bestc = (rmsle_from_log(cal * lp, lt), cal)
+        print(f'усадка задана флагом: {cal} -> val RMSLE {bestc[0]:.4f} '
+              f'(подбор отключён; при нарушенном зазоре это число НЕ показатель)')
     else:
         cal = a.calib; bestc = (9e9, 1.0)
         for c in [1.0, 0.97, 0.95, 0.93, 0.9, 0.87, 0.85]:
@@ -495,6 +504,12 @@ if __name__ == '__main__':
                         'число берите из парного прогона с зазором')
     p.add_argument('--cal-fixed', type=float, default=0.0,
                    help='усадка из парного прогона с зазором; 0 = подбирать на валидации')
+    p.add_argument('--test-anchor', type=int, default=0,
+                   help='якорь для --predict; 0 = 408 (2026-02-13). Поставьте 380 для '
+                        'инференса с застоялостью 28 дней')
+    p.add_argument('--val-all', action='store_true',
+                   help='игнорировать маску valid_anchor и брать все 250000 юзеров; '
+                        'нужно при выгрузке с ранних якорей')
     p.add_argument('--no-plots', action='store_true')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--tag', default='', help='метка прогона: имена чекпоинта и val-файлов')

@@ -95,6 +95,10 @@ def main() -> int:
     ap.add_argument("--minutes", type=float, default=55, help="бюджет одного прогона фазы A")
     ap.add_argument("--out", default="_to_kosta", help="куда сложить результат")
     ap.add_argument("--skip-b", action="store_true", help="только фаза A")
+    ap.add_argument("--stale", type=int, default=0,
+                    help="этап C: инференс тем же чекпойнтом с якоря на N дней раньше "
+                         "(запрос трека 4). 28 = якоря 350 (val) и 380 (test). "
+                         "0 = этап пропустить")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -130,7 +134,7 @@ def main() -> int:
                 "Либо укажите --data на уже собранный тензор (у вас он был в C:\\ozon\\tensor).")
         free = shutil.disk_usage(data.parent if data.parent.exists() else root).free / 2**30
         print(f"  исходник: {src} ({src.stat().st_size/2**20:.0f} МБ)")
-        print(f"  тензор займёт ~2.6 ГБ, свободно {free:.1f} ГБ, сборка занимает ~12 минут")
+        print(f"  тензор займёт ~2.6 ГБ, свободно {free:.1f} ГБ, сборка обычно 1-12 минут")
         if free < 3.0:
             raise SystemExit(f"мало места: {free:.1f} ГБ, нужно минимум 3 ГБ")
         if a.dry_run:
@@ -188,9 +192,15 @@ def main() -> int:
 
     # ---------- 1. когорта трёх блоков ----------
     log("1. Маска когорты трёх блоков")
-    m = np.load(data / "meta.npz", allow_pickle=False)
-    if "valid_anchor3" in m.files:
+    meta_p = data / "meta.npz"
+    if not meta_p.exists():
+        # сюда попадаем только в --dry-run: тензор ещё не собран, читать нечего
+        print("  тензор ещё не собран — маску поставим сразу после сборки")
+        print(f"  $ {py} {seq/'make_valid3.py'} --data {data}")
+        m = None
+    elif "valid_anchor3" in np.load(meta_p, allow_pickle=False).files:
         print("  valid_anchor3 уже есть в meta.npz — пропускаю")
+        m = None
     elif a.dry_run:
         print(f"  $ {py} {seq/'make_valid3.py'} --data {data}")
     else:
@@ -274,6 +284,71 @@ def main() -> int:
             quarantine(tag)
             if rc: raise SystemExit(f"фаза B, сид {s}: прогон упал")
             print(f"  {tag} готов за {(time.time()-t)/60:.1f} мин")
+        # Страховочный проход ПОСЛЕ цикла для всех сидов сразу, включая
+        # пропущенные старыми прогонами (дополняет карантин внутри цикла)
+        for s in SEEDS:
+            bad = root / "work" / "preds" / f"tfm2_s{s}_rt_val.parquet"
+            if bad.exists():
+                bad.rename(bad.with_suffix(".parquet.LEAKY_DO_NOT_USE"))
+                print(f"  tfm2_s{s}_rt_val.parquet переименован: у него нарушен зазор")
+
+    # ---------- 4b. этап C: инференс с ранних якорей ----------
+    STALE_TAGS = []
+    if a.stale and not a.dry_run:
+        S = a.stale
+        VAL_A, TEST_A = 378 - S, 408 - S      # якоря инференса
+        BOUND_A, BOUND_B = 378 - 30, 378      # границы обучения чекпойнтов фаз A и B
+        log(f"4b. ЭТАП C — инференс с застоялостью {S} дней")
+        # Якорь инференса обязан лежать ВНЕ обучающего диапазона чекпойнта,
+        # иначе модель не прогнозирует, а воспроизводит свои же обучающие строки.
+        if VAL_A <= BOUND_A:
+            raise SystemExit(f"якорь val {VAL_A} не больше границы обучения фазы A ({BOUND_A}): "
+                             f"это утечка. Максимум --stale {378 - BOUND_A - 1}")
+        if TEST_A <= BOUND_B:
+            raise SystemExit(f"якорь test {TEST_A} не больше границы обучения фазы B ({BOUND_B}): "
+                             f"это утечка. Максимум --stale {408 - BOUND_B - 1}")
+        print(f"  val:  якорь {VAL_A}, чекпойнт фазы A учился по {BOUND_A} — запас "
+              f"{VAL_A - BOUND_A} дн, застоялость {378 - VAL_A} дн")
+        print(f"  test: якорь {TEST_A}, чекпойнт фазы B учился по {BOUND_B} — запас "
+              f"{TEST_A - BOUND_B} дн, застоялость {408 - TEST_A} дн")
+        arch = ["--arch", "transformer", "--channels", "192", "--layers", "4",
+                "--heads", "4", "--dropout", "0.0", "--batch", "512", "--ema", "0.995"]
+        for sd in SEEDS:
+            base = f"tfm2_s{sd}"
+            cal = str(plan[base]["shrink"]) if base in plan else "0.95"
+            for side, ckpt, tag, extra in (
+                ("val", root / f"model_{base}.pt", f"{base}_stale{S}",
+                 ["--val-anchor", str(VAL_A)]),
+                ("test", root / f"model_{base}_rt.pt", f"{base}_rtstale{S}",
+                 ["--val-anchor", str(VAL_A), "--test-anchor", str(TEST_A),
+                  "--predict", f"sub_{base}_rtstale{S}.csv"])):
+                want = root / "work" / "preds" / f"{tag}_{'val' if side=='val' else 'test'}.parquet"
+                if want.exists(): print(f"  {tag} ({side}): готов, пропускаю"); continue
+                if not ckpt.exists():
+                    print(f"  НЕТ чекпойнта {ckpt.name} — {side} для сида {sd} пропущен"); continue
+                cmd = [py, str(seq / "train_tcn.py"), "--data", str(data), *arch,
+                       "--eval-only", "--ckpt", str(ckpt), "--val-all", "--cal-fixed", cal,
+                       "--export", str(root / "work" / "preds"), "--tag", tag,
+                       "--no-plots", *extra]
+                if run(cmd, logs / f"{tag}_{side}.log"):
+                    raise SystemExit(f"этап C, сид {sd}, {side}: прогон упал")
+            STALE_TAGS.append(base)
+        # val-выгрузка тестовой стороны сделана чекпойнтом фазы B, который учился
+        # по 378 — якорь 350 внутри его обучения. Изолируем.
+        for sd in SEEDS:
+            bad = root / "work" / "preds" / f"tfm2_s{sd}_rtstale{S}_val.parquet"
+            if bad.exists():
+                bad.rename(bad.with_suffix(".parquet.LEAKY_DO_NOT_USE"))
+        # усреднение трёх сидов в одну пару, как просил трек 4
+        for side, tags in (("val", [f"tfm2_s{d}_stale{S}_val.parquet" for d in SEEDS]),
+                           ("test", [f"tfm2_s{d}_rtstale{S}_test.parquet" for d in SEEDS])):
+            srcs = [root / "work" / "preds" / t for t in tags]
+            if not all(x.exists() for x in srcs):
+                print(f"  усреднение {side}: не хватает файлов, пропускаю"); continue
+            out_p = root / "work" / "preds" / f"tfm3_stale{S}_{side}.parquet"
+            if run([py, str(seq / "avg_seeds.py"), "--out", str(out_p), *[str(x) for x in srcs]],
+                   logs / f"avg_stale{S}_{side}.log"):
+                raise SystemExit(f"усреднение {side} упало")
 
     # ---------- 5. собрать ----------
     if a.dry_run: print("\n--dry-run: ничего не запускалось"); return 0
@@ -284,6 +359,8 @@ def main() -> int:
         want += [root / "work" / "preds" / f"tfm2_s{s}_rt_test.parquet" for s in SEEDS]
     want += [root / f"val_user_ids_tfm2_s1.npy", root / f"val_logtrue_tfm2_s1.npy",
              root / "work" / "reports" / "tfm2_phaseA.json"]
+    if a.stale:
+        want += [root / "work" / "preds" / f"tfm3_stale{a.stale}_{x}.parquet" for x in ("val", "test")]
     want += [logs / f"tfm2_s{s}.log" for s in SEEDS]
     want += [root / f"history_tfm2_s{s}.csv" for s in SEEDS]
     n = 0
