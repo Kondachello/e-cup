@@ -10,12 +10,13 @@
   A2 = 2025-12-01 -> окно 12-02..12-31   (разнос 42 дня)
 Обучение модели строго на срезах <= 2025-09-20 (зазор 30 к A1).
 """
+import os
 import numpy as np, polars as pl, lightgbm as lgb, json
 from datetime import date
 from pathlib import Path
 from sklearn.linear_model import Ridge
 
-CACHE = Path("../zhenya/cache")
+CACHE = Path(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache"))
 A1, A2 = date(2025, 10, 20), date(2025, 12, 1)
 TRAIN = [date(2025, 8, 11), date(2025, 8, 25), date(2025, 9, 8)]
 
@@ -98,5 +99,5 @@ sb = 1.6664
 mn = min(dt["fwd"], dt["bwd"])
 if mn > 0:
     print(f"  верхняя оценка выигрыша DT: {sb - sb*np.sqrt(1-mn):.6f} RMSLE (порог 0.0003, шум 0.000022)")
-Path("../zhenya/out").mkdir(exist_ok=True, parents=True)
-Path("../zhenya/out/g8_transfer.json").write_text(json.dumps(R, indent=1))
+Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out")).mkdir(exist_ok=True, parents=True)
+Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/g8_transfer.json").write_text(json.dumps(R, indent=1))

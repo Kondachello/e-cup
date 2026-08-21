@@ -10,12 +10,13 @@ DAYTYPE — таксономия дня, найденная в разведке:
 TRANS — переходы между типами дней подряд (марковская структура).
 CTL   — контроль равной ёмкости: столько же СТАРЫХ величин на тех же окнах.
 """
+import os
 import polars as pl, numpy as np, sys
 from datetime import date, timedelta
 from pathlib import Path
 
 df = pl.read_parquet("train.parquet")
-CACHE = Path("../zhenya/cache"); CACHE.mkdir(exist_ok=True, parents=True)
+CACHE = Path(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache")); CACHE.mkdir(exist_ok=True, parents=True)
 VAL, TEST = date(2026, 1, 14), date(2026, 2, 13)
 W = (7, 14, 30, 60, 90, 180, 365)
 DW = (7, 14, 30, 60, 90, 180, 365)

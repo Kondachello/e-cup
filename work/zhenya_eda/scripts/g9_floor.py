@@ -3,12 +3,13 @@
 отрицательный R^2. Честный контроль — представление ТОЙ ЖЕ РАЗМЕРНОСТИ из СТАРЫХ
 признаков: по теории оно лежит в оболочке и должно давать ~0.
 Меряем оба контроля как функцию числа колонок."""
+import os
 import numpy as np, polars as pl
 from datetime import date
 from pathlib import Path
 from sklearn.linear_model import Ridge
 
-X = pl.read_parquet(Path("../zhenya/cache")/f"a{date(2026,1,14)}.parquet")
+X = pl.read_parquet(Path(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache"))/f"a{date(2026,1,14)}.parquet")
 v = pl.read_parquet("work/preds_pack/val_preds.parquet").sort("user_id")
 ly = np.log1p(np.clip(v["target"].to_numpy().astype(np.float64),0,None))
 resid = ly - v["blend"].to_numpy().astype(np.float64)

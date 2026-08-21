@@ -4,6 +4,7 @@
 Значит в валидации доля отсутствующих РАВНА НУЛЮ ПО ПОСТРОЕНИЮ, а в тесте — нет.
 Меряем естественную долю по всем историческим окнам.
 """
+import os
 import polars as pl, numpy as np
 from datetime import date, timedelta
 df = pl.read_parquet("train.parquet", columns=["user_id","event_date","to_ord","gmv"])
@@ -25,7 +26,7 @@ while a + timedelta(days=30) <= D1:
     a += timedelta(days=14)
 
 import json, pathlib
-pathlib.Path("../zhenya/out/absence.json").write_text(json.dumps(
+pathlib.Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/absence.json").write_text(json.dumps(
     [{"anchor":str(r[0]),"absent":r[1],"zero":r[2]} for r in rows], indent=1))
 
 print("\n=== КОНТРОЛЬ: активны ли все 250k в 30 дней ПЕРЕД валидационным якорем? ===")

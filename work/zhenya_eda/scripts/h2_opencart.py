@@ -3,6 +3,7 @@
 с ПОСЛЕДНЕГО ЗАКАЗА» так не выражается: её граница плавает по юзеру.
 Скрининг на остатке действующего бленда, контроль — равная ёмкость из старых величин.
 """
+import os
 import polars as pl, numpy as np
 from datetime import date, timedelta
 from sklearn.linear_model import Ridge
@@ -45,7 +46,7 @@ M = np.nan_to_num(M.to_numpy().astype(np.float64), nan=0., posinf=0., neginf=0.)
 M = np.sign(M)*np.log1p(np.abs(M))
 print(f"признаков открытой корзины: {M.shape[1]}  {cols}")
 
-X = pl.read_parquet("../zhenya/cache/a2026-01-14.parquet")
+X = pl.read_parquet(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache") + "/a2026-01-14.parquet")
 CT = X.select([c for c in X.columns if c.startswith("ct_")]).to_numpy().astype(np.float64)
 CT = np.sign(np.nan_to_num(CT))*np.log1p(np.abs(np.nan_to_num(CT)))
 B = X.select([c for c in X.columns if c.startswith("b_")]).to_numpy().astype(np.float64)

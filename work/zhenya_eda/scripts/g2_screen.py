@@ -7,12 +7,13 @@
   то же окно +0.000862 / перенос A1->A2 +0.000572 / обратно +0.000927 / плацебо -0.000123.
 Положительный результат ЗДЕСЬ без того переноса не значил бы ничего.
 """
+import os
 import numpy as np, polars as pl, json
 from datetime import date
 from pathlib import Path
 from sklearn.linear_model import Ridge
 
-CACHE = Path("../zhenya/cache")
+CACHE = Path(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache"))
 VAL = date(2026, 1, 14)
 
 v = pl.read_parquet("work/preds_pack/val_preds.parquet").sort("user_id")
@@ -81,5 +82,5 @@ single.sort(reverse=True)
 for r, c in single[:12]:
     print(f"   {c:18s} {r:+.6f}")
 
-Path("../zhenya/out").mkdir(exist_ok=True, parents=True)
-Path("../zhenya/out/g2_screen.json").write_text(json.dumps(out, indent=1))
+Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out")).mkdir(exist_ok=True, parents=True)
+Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/g2_screen.json").write_text(json.dumps(out, indent=1))

@@ -1,0 +1,23 @@
+{
+ "tfm2_s1": {
+  "best_step": 22000,
+  "best_val_rmsle": 1.6691592657605399,
+  "shrink": 0.95,
+  "shrink_rmsle": 1.67110368046049,
+  "fixed_steps": 23980
+ },
+ "tfm2_s2": {
+  "best_step": 18000,
+  "best_val_rmsle": 1.670268487667,
+  "shrink": 0.95,
+  "shrink_rmsle": 1.672278820272553,
+  "fixed_steps": 19620
+ },
+ "tfm2_s3": {
+  "best_step": 22000,
+  "best_val_rmsle": 1.669730928508967,
+  "shrink": 0.95,
+  "shrink_rmsle": 1.671739200195148,
+  "fixed_steps": 23980
+ }
+}

@@ -322,7 +322,12 @@ def main(a, st=None):
     # координатору нечего джойнить, поэтому --val-all маску обходит.
     val_u = (torch.arange(st.n_u) if a.val_all
              else torch.arange(st.n_u)[st.valid[:, VAL_ANCHOR]])
-    if a.val_all: print('--val-all: маска якоря обойдена, берём всех юзеров', flush=True)
+    if a.val_all:
+        # подвыборка убила бы смысл флага: по умолчанию --val-users 40000
+        if a.val_users:
+            print(f'--val-all: подвыборка {a.val_users} отключена', flush=True)
+            a.val_users = 0
+        print(f'--val-all: маска якоря обойдена, берём всех {len(val_u)} юзеров', flush=True)
     if a.val_users and a.val_users < len(val_u):        # сид фиксирован: иначе прогоны несравнимы
         g = torch.Generator().manual_seed(42)
         val_u = val_u[torch.randperm(len(val_u), generator=g)[:a.val_users]]

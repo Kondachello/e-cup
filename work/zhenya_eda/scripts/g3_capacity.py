@@ -6,11 +6,12 @@
 Правило команды №1: сравнивать только ПОСЛЕ калибровки — сырой порядок обманывал 8 раз.
 Правило команды: разброс между сидами может превышать эффект, поэтому несколько сидов.
 """
+import os
 import numpy as np, polars as pl, lightgbm as lgb, json, sys, gc
 from datetime import date, timedelta
 from pathlib import Path
 
-CACHE = Path("../zhenya/cache")
+CACHE = Path(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache"))
 VAL = date(2026, 1, 14)
 TRAIN = [VAL - timedelta(days=30 + 14 * i) for i in range(0, 10)]
 SEEDS = [42, 555]
@@ -80,5 +81,5 @@ print(f"\n{'DT против базы':44s} {dt - b:+.6f}")
 print(f"{'CTL против базы (это чистая ёмкость)':44s} {ct - b:+.6f}")
 print(f"\n{'>>> DT против КОНТРОЛЯ РАВНОЙ ЁМКОСТИ':44s} {dt - ct:+.6f}   <- РЕШАЮЩЕЕ ЧИСЛО")
 print(f"разброс между сидами ~{max(v[2] for v in res.values()):.6f}; порог приёмки 0.0003; шум 0.000022")
-Path("../zhenya/out/g3_capacity.json").write_text(json.dumps(
+Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/g3_capacity.json").write_text(json.dumps(
     {k: {"raw": v[0], "cal": v[1], "sd": v[2], "k": v[3]} for k, v in res.items()}, indent=1))

@@ -51,6 +51,15 @@ CFG = ["--arch", "transformer", "--lr", "7e-4", "--channels", "192",
 def log(msg): print(f"\n{'='*70}\n{msg}\n{'='*70}", flush=True)
 
 
+def parquet_rows(p: Path) -> int:
+    """Число строк, не читая данные. Выгрузка обязана быть на все 250000 юзеров."""
+    try:
+        import polars as pl
+        return int(pl.scan_parquet(p).select(pl.len()).collect().item())
+    except Exception:
+        return -1
+
+
 def run(cmd, logfile: Path) -> int:
     print("  $ " + " ".join(str(c) for c in cmd), flush=True)
     with open(logfile, "w", encoding="utf-8", errors="replace") as f:
@@ -314,8 +323,12 @@ def main() -> int:
               f"{VAL_A - BOUND_A} дн, застоялость {378 - VAL_A} дн")
         print(f"  test: якорь {TEST_A}, чекпойнт фазы B учился по {BOUND_B} — запас "
               f"{TEST_A - BOUND_B} дн, застоялость {408 - TEST_A} дн")
+        # --val-users 0 обязателен: по умолчанию train_tcn.py берёт 40000 юзеров,
+        # и выгрузка вышла бы неполной. Аргументы архитектуры тоже обязательны —
+        # build_model читает channels/layers/heads/dropout из них, не из чекпойнта.
         arch = ["--arch", "transformer", "--channels", "192", "--layers", "4",
-                "--heads", "4", "--dropout", "0.0", "--batch", "512", "--ema", "0.995"]
+                "--heads", "4", "--dropout", "0.0", "--batch", "512", "--ema", "0.995",
+                "--val-users", "0", "--min-anchor", "30"]
         sseeds = ([int(x) for x in a.stale_seeds.split(",") if x.strip()]
                   if a.stale_seeds else list(SEEDS))
         print(f"  сиды этапа C: {', '.join(map(str, sseeds))}"
@@ -330,7 +343,11 @@ def main() -> int:
                  ["--val-anchor", str(VAL_A), "--test-anchor", str(TEST_A),
                   "--predict", f"sub_{base}_rtstale{S}.csv"])):
                 want = root / "work" / "preds" / f"{tag}_{'val' if side=='val' else 'test'}.parquet"
-                if want.exists(): print(f"  {tag} ({side}): готов, пропускаю"); continue
+                if want.exists():
+                    nrow = parquet_rows(want)
+                    if nrow == 250000:
+                        print(f"  {tag} ({side}): готов, пропускаю"); continue
+                    print(f"  {tag} ({side}): в файле {nrow} строк вместо 250000 — пересчитываю")
                 if not ckpt.exists():
                     print(f"  НЕТ чекпойнта {ckpt.name} — {side} для сида {sd} пропущен"); continue
                 cmd = [py, str(seq / "train_tcn.py"), "--data", str(data), *arch,
