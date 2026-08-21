@@ -22,21 +22,28 @@ from datetime import date, datetime
 from pathlib import Path
 
 SD_E = 1.6664
-V_PRIOR = 0.042          # разброс κ МЕЖДУ классами (часть C)
+V_PRIOR = 0.0416         # τ² по REML на 15 осях реестра (часть C); τ=0.204
 TAU = V_PRIOR ** 0.5
 
 
-def sigma_kappa(G_rmsle: float, n_pub: int = 50_000) -> float:
-    """ЗАКОН из части C: σ_κ = sd(e)/sqrt(n·G_mse), G_mse = 2·sd(e)·G_rmsle.
-    SE(κ) НЕ константа: у мелкой оси она огромна, у крупной мала."""
+def sigma_kappa(q: float, n_pub: int = 50_000) -> float:
+    """ЗАКОН части C, проверен прямым замером (n1_sigma_arbiter, отношение 1.03-1.23):
+        σ_κ = F0 / sqrt(n_публики · q),   q = mean_P(h²) из параболы S²=F0²-2bc+b²q
+    ВНИМАНИЕ: параболическая σ из kappa_registry (шум_LB·(F0+S)/(2q)) занижена
+    в 1.1-11 раз — она масштабируется как 1/q, а истинная как 1/sqrt(q)."""
     import math
-    return SD_E / math.sqrt(n_pub * max(2 * SD_E * G_rmsle, 1e-12))
+    return SD_E / math.sqrt(n_pub * max(q, 1e-12))
 
 
-def dose(G_rmsle: float) -> float:
-    """сколько верить свежему замеру κ: w = V/(V+σ²). Перелом при G=0.0004"""
-    s = sigma_kappa(G_rmsle)
+def dose(q: float) -> float:
+    """сколько верить свежему замеру κ: w = τ²/(τ²+σ²). Перелом при q=0.00134"""
+    s = sigma_kappa(q)
     return V_PRIOR / (V_PRIOR + s * s)
+
+
+def q_from_gain(G_rmsle: float) -> float:
+    """грубый перевод: ось с валидационным выигрышем G при κ=1 имеет q≈2·F0·G"""
+    return 2 * SD_E * G_rmsle
 
 
 SE_K = 0.332             # оставлено для совместимости: это σ мелкой пробы (G~0.00015)
@@ -63,10 +70,10 @@ def attempts_left(today: date) -> int:
     return max(0, (LAST_SUB - today).days + 1) * PER_DAY
 
 
-def shrink(k_hat: float, G_rmsle: float, mu_class: float = M_PRIOR) -> float:
-    """усадка замеренной κ к приору класса; вес зависит от ВЕЛИЧИНЫ оси (часть C)"""
-    w = dose(G_rmsle)
-    return w * k_hat + (1 - w) * mu_class
+def shrink(k_hat: float, q: float, mu: float = M_PRIOR) -> float:
+    """усадка замеренной κ; приор ПЛОСКИЙ N(0.333, 0.205²) — классовый проиграл LOO"""
+    w = dose(q)
+    return w * k_hat + (1 - w) * mu
 
 
 def apply_gain(G: float, kappa: float) -> float:
@@ -81,7 +88,8 @@ def probe_value(ax: dict) -> float:
         a = max(0.0, 1 - SE_K ** 2 / (k ** 2 + SE_K ** 2))
         return a * k * k * ax["q"]
     # тип L: зонд лишь уточняет κ. Доза теперь СВОЯ у каждой оси (часть C).
-    return dose(ax["mdl_corund"]) * V_PRIOR * ax["mdl_corund"]
+    q = ax.get("q") or q_from_gain(ax["mdl_corund"])
+    return dose(q) * V_PRIOR * ax["mdl_corund"]
 
 
 def bank_value(ax: dict) -> float:
