@@ -29,7 +29,7 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import PREDS_DIR, ROOT
-from margin import calibrate_honest, score
+from margin import calibrate_split, score
 
 NOISE = 0.000022
 
@@ -47,9 +47,17 @@ def nnls_weights(A: np.ndarray, y: np.ndarray) -> np.ndarray:
     from scipy.optimize import nnls
     G = A.T @ A
     b = A.T @ y
-    # Cholesky factor of the Gram matrix turns min||Aw-y|| into an equivalent small NNLS
-    L = np.linalg.cholesky(G + 1e-10 * np.eye(len(G)))
-    return nnls(L.T, np.linalg.solve(L, b))[0]
+    # Cholesky factor of the Gram matrix turns min||Aw-y|| into an equivalent small NNLS.
+    # The pack ships near-duplicate columns, so a fixed 1e-10 ridge is not always enough:
+    # scale it to the matrix and grow it until the factorisation holds.
+    eps = 1e-10 * max(np.trace(G) / len(G), 1.0)
+    for _ in range(12):
+        try:
+            L = np.linalg.cholesky(G + eps * np.eye(len(G)))
+            return nnls(L.T, np.linalg.solve(L, b))[0]
+        except np.linalg.LinAlgError:
+            eps *= 100.0
+    return np.linalg.lstsq(A, y, rcond=None)[0].clip(0)
 
 
 def main():
@@ -67,6 +75,9 @@ def main():
     sb = score(lb, ly)
     print(f"эталон: бленд из пакета, скор {sb:.6f}, n={len(ly)}\n")
 
+    rng = np.random.default_rng(args.seed)
+    half = rng.permutation(len(ly)) < len(ly) // 2
+
     cand = {}
     for n in args.names:
         p = PREDS_DIR / f"{n}_val.parquet"
@@ -76,10 +87,10 @@ def main():
         df = pl.read_parquet(p).sort("user_id")
         assert np.array_equal(df["user_id"].to_numpy(), uid), f"порядок user_id не совпал: {p}"
         raw = np.log1p(np.clip(df["pred"].to_numpy().astype(np.float64), 0, None))
-        cand[n] = calibrate_honest(raw, ly, 24, args.seed)
-
-    rng = np.random.default_rng(args.seed)
-    half = rng.permutation(len(ly)) < len(ly) // 2
+        # shifts fitted on the weight-fitting half only: with a shared seed the calibration
+        # split and the fit/score split were bit-identical, so scoring rows calibrated the
+        # fitting rows. Sasha caught it; the fix is structural, not a different seed.
+        cand[n] = calibrate_split(raw, ly, half, 24)
 
     def gain(names):
         A = np.column_stack([lb] + [cand[n] for n in names])
