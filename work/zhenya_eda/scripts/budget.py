@@ -1,9 +1,9 @@
 """budget.py — считалка трат попыток. Подставляешь состояние, получаешь следующее действие.
 
 Константы взяты из части A и из замеров команды:
-  SE(κ) = 0.332   ошибка одного замера переносимости (три независимых подтверждения)
-  τ     = 0.205   разброс истинной κ между осями (избыточная дисперсия сверх шума)
-  w     = 0.28    вес свежего замера в апостериоре: κ̂ = 0.28·замер + 0.72·приор
+  σ_κ  = sd(e)/sqrt(n·G_mse)  — ЗАКОН из части C: SE замера κ НЕ константа,
+                 она определяется валидационным выигрышем самой оси
+  доза  w = V/(V+σ_κ²), V=0.042; перелом при G=0.0004: крупнее — верить замеру
   noise = 0.000022 фиктивный выигрыш одного подобранного направления на паблике
   SE_pub / SE_priv = 0.0056 / 0.0028 ; перенос public->private 0.584
 
@@ -21,9 +21,33 @@ import argparse, json, sys
 from datetime import date, datetime
 from pathlib import Path
 
-SE_K = 0.332
-TAU = 0.205
-W = TAU ** 2 / (TAU ** 2 + SE_K ** 2)
+SD_E = 1.6664
+V_PRIOR = 0.0416         # τ² по REML на 15 осях реестра (часть C); τ=0.204
+TAU = V_PRIOR ** 0.5
+
+
+def sigma_kappa(q: float, n_pub: int = 50_000) -> float:
+    """ЗАКОН части C, проверен прямым замером (n1_sigma_arbiter, отношение 1.03-1.23):
+        σ_κ = F0 / sqrt(n_публики · q),   q = mean_P(h²) из параболы S²=F0²-2bc+b²q
+    ВНИМАНИЕ: параболическая σ из kappa_registry (шум_LB·(F0+S)/(2q)) занижена
+    в 1.1-11 раз — она масштабируется как 1/q, а истинная как 1/sqrt(q)."""
+    import math
+    return SD_E / math.sqrt(n_pub * max(q, 1e-12))
+
+
+def dose(q: float) -> float:
+    """сколько верить свежему замеру κ: w = τ²/(τ²+σ²). Перелом при q=0.00134"""
+    s = sigma_kappa(q)
+    return V_PRIOR / (V_PRIOR + s * s)
+
+
+def q_from_gain(G_rmsle: float) -> float:
+    """грубый перевод: ось с валидационным выигрышем G при κ=1 имеет q≈2·F0·G"""
+    return 2 * SD_E * G_rmsle
+
+
+SE_K = 0.332             # оставлено для совместимости: это σ мелкой пробы (G~0.00015)
+W = V_PRIOR / (V_PRIOR + SE_K ** 2)
 M_PRIOR = 0.333
 NOISE = 0.000022
 SE_PUB, SE_PRIV = 0.0056, 0.0028
@@ -46,9 +70,10 @@ def attempts_left(today: date) -> int:
     return max(0, (LAST_SUB - today).days + 1) * PER_DAY
 
 
-def shrink(k_hat: float) -> float:
-    """усадка замеренной переносимости к приору класса"""
-    return W * k_hat + (1 - W) * M_PRIOR
+def shrink(k_hat: float, q: float, mu: float = M_PRIOR) -> float:
+    """усадка замеренной κ; приор ПЛОСКИЙ N(0.333, 0.205²) — классовый проиграл LOO"""
+    w = dose(q)
+    return w * k_hat + (1 - w) * mu
 
 
 def apply_gain(G: float, kappa: float) -> float:
@@ -62,7 +87,9 @@ def probe_value(ax: dict) -> float:
         k = ax.get("k_expect", 0.5)
         a = max(0.0, 1 - SE_K ** 2 / (k ** 2 + SE_K ** 2))
         return a * k * k * ax["q"]
-    return W * TAU ** 2 * ax["mdl_corund"]              # тип L: только уточнение κ
+    # тип L: зонд лишь уточняет κ. Доза теперь СВОЯ у каждой оси (часть C).
+    q = ax.get("q") or q_from_gain(ax["mdl_corund"])
+    return dose(q) * V_PRIOR * ax["mdl_corund"]
 
 
 def bank_value(ax: dict) -> float:
