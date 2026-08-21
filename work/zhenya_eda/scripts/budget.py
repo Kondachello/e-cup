@@ -1,9 +1,9 @@
 """budget.py — считалка трат попыток. Подставляешь состояние, получаешь следующее действие.
 
 Константы взяты из части A и из замеров команды:
-  SE(κ) = 0.332   ошибка одного замера переносимости (три независимых подтверждения)
-  τ     = 0.205   разброс истинной κ между осями (избыточная дисперсия сверх шума)
-  w     = 0.28    вес свежего замера в апостериоре: κ̂ = 0.28·замер + 0.72·приор
+  σ_κ  = sd(e)/sqrt(n·G_mse)  — ЗАКОН из части C: SE замера κ НЕ константа,
+                 она определяется валидационным выигрышем самой оси
+  доза  w = V/(V+σ_κ²), V=0.042; перелом при G=0.0004: крупнее — верить замеру
   noise = 0.000022 фиктивный выигрыш одного подобранного направления на паблике
   SE_pub / SE_priv = 0.0056 / 0.0028 ; перенос public->private 0.584
 
@@ -21,9 +21,26 @@ import argparse, json, sys
 from datetime import date, datetime
 from pathlib import Path
 
-SE_K = 0.332
-TAU = 0.205
-W = TAU ** 2 / (TAU ** 2 + SE_K ** 2)
+SD_E = 1.6664
+V_PRIOR = 0.042          # разброс κ МЕЖДУ классами (часть C)
+TAU = V_PRIOR ** 0.5
+
+
+def sigma_kappa(G_rmsle: float, n_pub: int = 50_000) -> float:
+    """ЗАКОН из части C: σ_κ = sd(e)/sqrt(n·G_mse), G_mse = 2·sd(e)·G_rmsle.
+    SE(κ) НЕ константа: у мелкой оси она огромна, у крупной мала."""
+    import math
+    return SD_E / math.sqrt(n_pub * max(2 * SD_E * G_rmsle, 1e-12))
+
+
+def dose(G_rmsle: float) -> float:
+    """сколько верить свежему замеру κ: w = V/(V+σ²). Перелом при G=0.0004"""
+    s = sigma_kappa(G_rmsle)
+    return V_PRIOR / (V_PRIOR + s * s)
+
+
+SE_K = 0.332             # оставлено для совместимости: это σ мелкой пробы (G~0.00015)
+W = V_PRIOR / (V_PRIOR + SE_K ** 2)
 M_PRIOR = 0.333
 NOISE = 0.000022
 SE_PUB, SE_PRIV = 0.0056, 0.0028
@@ -46,9 +63,10 @@ def attempts_left(today: date) -> int:
     return max(0, (LAST_SUB - today).days + 1) * PER_DAY
 
 
-def shrink(k_hat: float) -> float:
-    """усадка замеренной переносимости к приору класса"""
-    return W * k_hat + (1 - W) * M_PRIOR
+def shrink(k_hat: float, G_rmsle: float, mu_class: float = M_PRIOR) -> float:
+    """усадка замеренной κ к приору класса; вес зависит от ВЕЛИЧИНЫ оси (часть C)"""
+    w = dose(G_rmsle)
+    return w * k_hat + (1 - w) * mu_class
 
 
 def apply_gain(G: float, kappa: float) -> float:
@@ -62,7 +80,8 @@ def probe_value(ax: dict) -> float:
         k = ax.get("k_expect", 0.5)
         a = max(0.0, 1 - SE_K ** 2 / (k ** 2 + SE_K ** 2))
         return a * k * k * ax["q"]
-    return W * TAU ** 2 * ax["mdl_corund"]              # тип L: только уточнение κ
+    # тип L: зонд лишь уточняет κ. Доза теперь СВОЯ у каждой оси (часть C).
+    return dose(ax["mdl_corund"]) * V_PRIOR * ax["mdl_corund"]
 
 
 def bank_value(ax: dict) -> float:
