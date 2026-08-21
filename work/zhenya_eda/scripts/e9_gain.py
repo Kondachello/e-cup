@@ -6,6 +6,7 @@
 Плацебо = та же процедура, но обусловленная самим прогнозом (то, что команда
 уже делает и считает исчерпанным).
 """
+import os
 import polars as pl, numpy as np, lightgbm as lgb
 from datetime import date, timedelta
 from sklearn.metrics import roc_auc_score
@@ -65,7 +66,7 @@ lp = np.clip(m.predict(Xte), 0, None)
 mv = lgb.LGBMClassifier(objective="binary", learning_rate=0.05, num_leaves=63,
                         min_child_samples=100, n_estimators=500, verbose=-1, n_jobs=4).fit(Xtr, vtr)
 pv = mv.predict_proba(Xte)[:, 1]
-np.savez("../zhenya/out/e9_cache.npz", lp=lp, pv=pv, yte=yte, vte=vte, uid=uid)
+np.savez(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/e9_cache.npz", lp=lp, pv=pv, yte=yte, vte=vte, uid=uid)
 ly = np.log1p(yte)
 print(f"AUC исчезновения на замерном якоре: {roc_auc_score(vte, pv):.4f}")
 

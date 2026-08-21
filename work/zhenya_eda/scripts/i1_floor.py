@@ -7,12 +7,13 @@
 Близнецы неидеальны, поэтому оценка завышена; лечится экстраполяцией по
 расстоянию между близнецами к нулю.
 """
+import os
 import polars as pl, numpy as np
 from datetime import date
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
-X = pl.read_parquet("../zhenya/cache/a2026-01-14.parquet")
+X = pl.read_parquet(os.environ.get("ZH_CACHE", "work/zhenya_eda/cache") + "/a2026-01-14.parquet")
 v = pl.read_parquet("work/preds_pack/val_preds.parquet").sort("user_id")
 assert np.array_equal(X["user_id"].to_numpy(), v["user_id"].to_numpy())
 ly = np.log1p(np.clip(v["target"].to_numpy().astype(np.float64),0,None))

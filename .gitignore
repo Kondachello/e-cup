@@ -44,3 +44,6 @@ work/data/*.npz
 work/yoy_dirs.npz
 work/reports/mb_fix_*.npz
 work/reports/mb_fix_*.npy
+
+# кэш признаков Жени (пересобирается g1_build.py)
+work/zhenya_eda/cache/

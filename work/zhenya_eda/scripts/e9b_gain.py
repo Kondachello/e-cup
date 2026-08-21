@@ -1,6 +1,7 @@
 """E9b. Анализ поправок на кэшированных прогнозах (якорь 2025-10-11)."""
+import os
 import numpy as np
-d = np.load("../zhenya/out/e9_cache.npz")
+d = np.load(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/e9_cache.npz")
 lp, pv, yte, vte = d["lp"], d["pv"], d["yte"], d["vte"]
 ly = np.log1p(yte)
 rm = lambda l: float(np.sqrt(np.mean((l - ly) ** 2)))

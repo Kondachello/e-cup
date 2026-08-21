@@ -5,6 +5,7 @@
 Вопрос: какая доля такой популяции отсутствует в [A+1, A+30]?
 В валидации команды ответ 0% ПО ПОСТРОЕНИЮ. В тесте — нет.
 """
+import os
 import polars as pl, numpy as np
 from datetime import date, timedelta
 df = pl.read_parquet("train.parquet", columns=["user_id","event_date","gmv"])
@@ -29,7 +30,7 @@ while A + timedelta(days=30) <= date(2026,2,13):
     A += timedelta(days=21)
 
 import json, pathlib
-pathlib.Path("../zhenya/out/vanish.json").write_text(json.dumps(
+pathlib.Path(os.environ.get("ZH_OUT", "work/zhenya_eda/out") + "/vanish.json").write_text(json.dumps(
     [{"anchor":str(a),"sel":s,"vanish":v,"zero":z} for a,s,v,z in out], indent=1))
 
 v = np.array([100*v/s for _,s,v,_ in out])
