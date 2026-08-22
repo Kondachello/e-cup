@@ -510,3 +510,12 @@ hawkes_r2	1.878159	hawkes event-stream: alpha=0.65 beta=1/3.5d выбраны н
 hz_fixsmoke_surv	1.728035	daily hazard surv: days=30 stride=3 uf=0.05 trees=60 scen=6
 hz_fixsmoke_pb	1.729047	daily hazard pb: days=30 stride=3 uf=0.05 trees=60 scen=6
 hz_fixsmoke_mc	1.850146	daily hazard mc: days=30 stride=3 uf=0.05 trees=60 scen=6
+hz_v2_surv	1.705431	daily hazard surv: days=300 stride=2 uf=0.35 trees=600 scen=48
+hz_v2_pb	1.706538	daily hazard pb: days=300 stride=2 uf=0.35 trees=600 scen=48
+hz_v2_mc	1.722465	daily hazard mc: days=300 stride=2 uf=0.35 trees=600 scen=48
+twl_v8	1.693040	grave recheck v8: champion tweedie + v8 gifter/awakening tier (19 feats), paired with twl_v8cap (USE_V5CAP=19); new-epoch blend 1.665647
+hz_v2_mc_cal	1.713965	binned log-shift calibration of hz_v2_mc; holdout 1.721314->1.713562
+twl_v8_cal	1.669335	binned log-shift calibration of twl_v8; holdout 1.693433->1.669846
+twl_v8cap	1.694167	CAPACITY control for twl_v8: 19 rotated rank-columns of existing features, no new information; paired seed/config
+kevf_s42_cal	1.669828	binned log-shift calibration of kevf_s42; holdout 1.692048->1.670696
+blend_opt	1.665108	re-optimised blend: lib=B_plus_cal(238) method=ridge_free alpha_rel=0.0001; OOF(5f by user)=1.665254; current mix val 1.667432; w={'kevf_s42_cal': 0.1893, 'kostya46_cal': 0.1045, 'fusion_v3ctl_cal': 0.1012, 'tfm3b_cal': 0.0809, 'gseq_small_s42_cal': 0.0697, 'kostya46_avg2_cal': 0.0684, 'tfm3b_pre2_cal': 0.0633, 'fusion_v3c_avg_cal': 0.0616, 'fusion_v3c42_cal': 0.0517, 'behavonly_avg_cal': 0.0511, 'weak_an_d_cal': 0.04, 'wklin': 0.0304, 'hz_v2_mc': 0.0288, 'weak_ft_recency_cal': 0.0282, 'tfm3_stale28': 0.0234, 'wklin_wk_cal': 0.0064, 'febspec2_cal': 0.0048}
