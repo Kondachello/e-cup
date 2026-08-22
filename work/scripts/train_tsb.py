@@ -89,12 +89,19 @@ def tsb_snapshots(M: np.ndarray, ap: float, az: float, snap_at: dict[int, str]):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="tsb")
+    ap.add_argument("--extra-anchor", default="",
+                    help="доп. якорь для снимка, ISO. Нужен, чтобы мерить TSB на окне, где "
+                         "молчащие ЕСТЬ: на валидации их 0.0%% по построению отбора юзеров, "
+                         "а TSB — модель прерывистого спроса, её сила именно в молчании")
     args = ap.parse_args()
     t0 = time.time()
 
     uid, M = load_matrix_gmv()
     print(f"матрица {M.shape}, load {time.time()-t0:.0f}s", flush=True)
     snap = {day_idx(SELECT_ANCHOR): "dec", day_idx(VAL_ANCHOR): "val", day_idx(TEST_ANCHOR): "test"}
+    extra_a = date.fromisoformat(args.extra_anchor) if args.extra_anchor else None
+    if extra_a is not None:
+        snap[day_idx(extra_a)] = "extra"
 
     y_dec = window_target(SELECT_ANCHOR)
     best = (9e9, None, None)
@@ -114,6 +121,11 @@ def main():
     save_preds(args.name, "test", uid, f["test"])
     log_score(args.name, s_val,
               f"TSB intermittent demand, ap={a_p} az={a_z} выбраны на DEC31; 30*p*z, без признаков")
+    if extra_a is not None:
+        y_ex = window_target(extra_a)
+        s_ex = rmsle(y_ex, f["extra"])
+        save_preds(f"{args.name}_at{extra_a.isoformat()}", "val", uid, f["extra"])
+        print(f"  доп. якорь {extra_a}: RMSLE={s_ex:.6f} (валидация {s_val:.6f})", flush=True)
     print(f"[DONE] {args.name} val={s_val:.6f} {time.time()-t0:.0f}s", flush=True)
 
 
