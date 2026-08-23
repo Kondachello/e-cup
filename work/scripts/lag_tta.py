@@ -85,7 +85,14 @@ def main():
 
     if args.test_only:
         val = load_anchor(VAL_ANCHOR).sort("user_id")
-        emit_test(args, feature_cols(val), val["user_id"].to_numpy(), args.test_only)
+        # --test-only переиспользует известную точку остановки val-прогона, поэтому
+        # число его обучающих якорей надо восстановить тем же правилом, что в main
+        lags_o = [int(x) for x in args.lags.split(",")]
+        stale_o = [VAL_ANCHOR - timedelta(days=d) for d in lags_o if d]
+        cut_o = min([VAL_ANCHOR - timedelta(days=30)]
+                    + [a - timedelta(days=1) for a in stale_o])
+        emit_test(args, feature_cols(val), val["user_id"].to_numpy(), args.test_only,
+                  len(champion_anchors(cut_o)))
         print(f"[DONE] {time.time()-t0:.0f}s", flush=True)
         return
 
@@ -185,11 +192,11 @@ def main():
         r_err = float(np.corrcoef(e0, lp[name] - yv)[0, 1])
         print(f"{name}: corr(pred)={r_pred:.4f} corr(err vs {fresh})={r_err:.4f}", flush=True)
     if args.test:
-        emit_test(args, cols, uid, it)
+        emit_test(args, cols, uid, it, len(tr_anchors))
     print(f"[DONE] {time.time()-t0:.0f}s", flush=True)
 
 
-def emit_test(args, cols, uid_val, val_iter):
+def emit_test(args, cols, uid_val, val_iter, n_val_anchors: int):
     """Test-window counterpart of the winning vintage.
 
     The test anchor is 2026-02-13 and anchors are spaced 14 days, so the vintage
@@ -217,7 +224,16 @@ def emit_test(args, cols, uid_val, val_iter):
                 lambda_l2=5.0, max_bin=127, num_threads=7, seed=args.seed, verbosity=-1)
     # No held-out anchor is left to early-stop on, so reuse the val run's stopping point,
     # scaled by the data growth exactly as train_gbdt.py does on its retrain path.
-    n_iter = max(50, int(val_iter * (1.0 + 0.7 * max(len(anchors) / 9.0 - 1.0, 0.0))))
+    #
+    # Делитель раньше был зашит константой 9.0 — числом обучающих якорей val-стороны на
+    # момент написания. Но набор якорей берётся с диска и меняется: сейчас их 11, и
+    # константа давала множитель 1.78 вместо 1.51, то есть +18% итераций. Все прочие
+    # трейнеры считают row_ratio по факту; считаем и здесь.
+    row_ratio = len(anchors) / max(n_val_anchors, 1)
+    iter_mult = 1.0 + 0.7 * max(row_ratio - 1.0, 0.0)
+    n_iter = max(50, int(val_iter * iter_mult))
+    print(f"test: якорей {len(anchors)} против {n_val_anchors} на val -> "
+          f"row_ratio={row_ratio:.3f} iter_mult={iter_mult:.3f} n_iter={n_iter}", flush=True)
     print(f"test: {X.shape[0]} строк, {n_iter} итераций (val it={val_iter}), "
           f"objective={args.objective}", flush=True)
     if args.objective == "two_stage":

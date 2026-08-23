@@ -110,6 +110,30 @@ def score(lp: np.ndarray, ly: np.ndarray) -> float:
     return float(np.sqrt(np.mean((lp - ly) ** 2)))
 
 
+def pair_contribution(sb: float, sm: float, margin: float) -> float:
+    """Exact pair algebra: what this model adds to the blend, in RMSLE.
+
+        вклад = sb^2 sm^2 z^2 / ((sm^2 - sb^2 + 2 sb sm z) * 2 sb),   z = max(margin, 0)
+
+    The old shorthand `7.1 * margin^2` is dead (KNOWLEDGE «ПОПРАВКА К ЗАКОНУ ВКЛАДА»):
+    it was calibrated on weak models (sm/sb ~ 1.06), explained 9% of the spread and
+    under-priced strong models 3-20x -- which is how kostya46, now the blend's largest
+    member, was nearly discarded. For a strong model (sm/sb -> 1) the contribution is
+    almost LINEAR in the margin, so the margin needed to clear a threshold depends on
+    the model's own score.
+
+    A negative margin means beta >= 1, i.e. the optimiser gives the model zero weight;
+    the floor at zero is not cosmetic -- a negative z would flip the numerator's sign.
+
+    Single source of truth for every acceptance path in the project (margin.py,
+    work/colab/ingest.py); sets of candidates are still measured by joint_gain.py,
+    because margins do not add up.
+    """
+    z = max(float(margin), 0.0)
+    den = (sm * sm - sb * sb + 2.0 * sb * sm * z) * 2.0 * sb
+    return (sb * sb * sm * sm * z * z) / den if den > 1e-12 else 0.0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*", help="model names -> work/preds/NAME_val.parquet")
@@ -153,12 +177,7 @@ def main():
             # calibration the two coincide, so old numbers on _cal models stand.
             rho = float(np.mean(e * eb) / (sm * sb))
             margin = sb / sm - rho
-            # the identity is margin = (sb/sm)(1 - beta): margin <= 0 means beta >= 1, i.e. the
-            # optimiser gives this model zero weight. A negative margin would flip the sign of
-            # the exact formula's numerator, so the floor is not cosmetic.
-            z = max(margin, 0.0)
-            den = (sm * sm - sb * sb + 2.0 * sb * sm * z) * 2.0 * sb
-            contrib = (sb * sb * sm * sm * z * z) / den if den > 1e-12 else 0.0
+            contrib = pair_contribution(sb, sm, margin)
             verdict = ("ГОДИТСЯ" if contrib >= THRESHOLD else
                        "слабо, но не шум" if contrib >= 2 * NOISE else "шум")
             label = f"{name} {tag}".strip()

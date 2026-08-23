@@ -62,6 +62,29 @@ def _versions() -> dict:
     return out
 
 
+_TIER_FILE = {"USE_V2": "extra", "USE_V3": "v3", "USE_V4": "v4", "USE_V5": "v5",
+              "USE_V6": "v6", "USE_V7": "v7", "USE_V8": "v8", "USE_V10": "v10"}
+
+
+def _tiers_on_disk(feats, anchors: list[str]) -> dict:
+    """Сколько якорей реально имеют каждый тир.
+
+    Переменная окружения говорит, что тир ЗАПРОШЕН, а load_anchor подключает его
+    только при наличии файла. Расхождение между запрошенным и лежащим на диске и
+    есть механизм «196 признаков вместо 203»: набор молча сужается, модель
+    выглядит нормальной, а причина нигде не записана. Поэтому в отпечаток идёт
+    ФАКТ, а не намерение.
+    """
+    if not feats.exists():
+        return {}
+    out = {}
+    for env, suffix in _TIER_FILE.items():
+        n = sum(1 for a in anchors if (feats / f"anchor={a}.{suffix}.parquet").exists())
+        if n:
+            out[suffix] = n
+    return out
+
+
 def snapshot(extra: dict | None = None) -> dict:
     """Полный отпечаток среды и входов на момент вызова."""
     feats = _ROOT / "work" / "features"
@@ -74,6 +97,7 @@ def snapshot(extra: dict | None = None) -> dict:
         "git_head": _git_head(),
         "argv": " ".join(sys.argv[:12]),
         "tiers_enabled": tiers,
+        "tiers_on_disk": _tiers_on_disk(feats, anchors),
         "anchors_on_disk": anchors,
         "n_anchors_on_disk": len(anchors),
         "versions": _versions(),
@@ -105,7 +129,13 @@ def diff(a: str | Path, b: str | Path) -> None:
         if va == vb:
             same += 1
             continue
-        if k == "anchors_on_disk":
+        if k == "tiers_on_disk":
+            keys = sorted(set(va or {}) | set(vb or {}))
+            for t in keys:
+                x, y = (va or {}).get(t), (vb or {}).get(t)
+                if x != y:
+                    print(f"РАЗЛИЧИЕ {k}[{t}]: слева {x} якорей, справа {y}")
+        elif k == "anchors_on_disk":
             only_a = [x for x in (va or []) if x not in (vb or [])]
             only_b = [x for x in (vb or []) if x not in (va or [])]
             print(f"РАЗЛИЧИЕ {k}: только слева {only_a or '—'}; только справа {only_b or '—'}")

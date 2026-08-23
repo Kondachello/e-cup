@@ -10,6 +10,8 @@ Predictions are raw GMV scale (>=0), NOT log.
 """
 from __future__ import annotations
 
+import os
+
 try:
     import fcntl
 except ImportError:      # Windows: нет flock, трек 5 упирался в это
@@ -75,6 +77,11 @@ def log_score(name: str, val_rmsle: float, notes: str = ""):
         if fcntl:
             fcntl.flock(f, fcntl.LOCK_EX)
         f.write(f"{name}\t{val_rmsle:.6f}\t{notes}\n")
+        # flush ДО снятия блокировки: f.write кладёт строку в буфер питона, а сброс на
+        # диск раньше происходил при выходе из with, то есть уже ПОСЛЕ LOCK_UN — и
+        # блокировка не защищала собственно запись.
+        f.flush()
+        os.fsync(f.fileno())
         if fcntl:
             fcntl.flock(f, fcntl.LOCK_UN)
     print(f"[SCORE] {name}: {val_rmsle:.6f} ({notes})", flush=True)

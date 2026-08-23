@@ -239,8 +239,14 @@ def main():
                     help="alternative validation anchor (e.g. 2025-12-31); implies --no-test")
     ap.add_argument("--detrend", action="store_true",
                     help="log_mse only: train on log1p(y) minus per-anchor mean; add back last-2-anchor mean level at predict")
-    ap.add_argument("--gap-days", type=int, default=0,
-                    help="exclude train anchors within GAP days before the val anchor (30 = no target-window overlap with val)")
+    ap.add_argument("--gap-days", type=int, default=30,
+                    help="exclude train anchors within GAP days before the val anchor "
+                         "(30 = no target-window overlap with val; ЭТО УМОЛЧАНИЕ). "
+                         "Было 0 — единственный трейнер проекта с небезопасным "
+                         "умолчанием при том, что правило №1 звучит «обучение только с "
+                         "зазором 30, иначе скор завышается на 0.05-0.10». Именно так "
+                         "зоопарк work/preds оказался отравлен pre-gap эпохой. "
+                         "0 задавать можно, но теперь только явно.")
     ap.add_argument("--es-metric", choices=["raw", "cal"], default="raw",
                     help="early-stopping criterion: raw = LightGBM's own val metric "
                          "(default, keeps historical behaviour bit-for-bit), cal = the "
@@ -281,6 +287,9 @@ def main():
         tr_anchors = [a for a in tr_anchors if a <= cutoff]
     if args.n_anchors:
         tr_anchors = tr_anchors[-args.n_anchors:]
+    print(f"gap_days={args.gap_days}"
+          + ("  ВНИМАНИЕ: зазор выключен явно, val-скор будет завышен" if not args.gap_days else ""),
+          flush=True)
     print(f"train anchors: {[a.isoformat() for a in tr_anchors]}", flush=True)
 
     val = load_anchor(VAL_ANCHOR)
@@ -439,11 +448,12 @@ def main():
                 wg = np.concatenate(gaw)
             del gtr
             print(f"retrain adds gap anchors {[a.isoformat() for a in gap_anchors]}: +{len(yg_raw)} rows", flush=True)
-    valX = Xv
-    parts = [X] + ([Xg] if Xg is not None else []) + [valX]
+    parts = [X] + ([Xg] if Xg is not None else []) + [Xv]
     Xall = np.vstack(parts)
     row_ratio = Xall.shape[0] / max(X.shape[0], 1)
-    del X, Xv
+    # parts держал ссылки на X/Xg/Xv, поэтому прежний `del X, Xv` память не отдавал:
+    # копия жила до конца функции. На 16 ГБ это заметно (у проекта два OOM в истории).
+    del parts, X, Xv, Xg
     test = load_anchor(TEST_ANCHOR)
     Xt = test.select(cols).to_numpy().astype(np.float32)
     uid_t = test["user_id"].to_numpy()

@@ -118,9 +118,38 @@ def free_gb() -> float:
 
 
 # ------------------------------------------------------------------ anchor plan
-def anchor_plan() -> dict:
-    """The exact anchors the champion protocol touches, split by role."""
+def on_val_week_grid(a: date) -> bool:
+    """Стоит ли якорь на 7-дневной сетке валидационного якоря."""
+    return (VAL_ANCHOR - a).days % 7 == 0
+
+
+def anchor_plan(strict_grid: bool = True) -> dict:
+    """The exact anchors the champion protocol touches, split by role.
+
+    СЕТКА. Всё, что кормится из общей недельной матрицы (`weekly_dense(VAL_ANCHOR)` +
+    `joint_block(G, off)`), опирается на то, что каждый якорь отстоит от VAL на целое
+    число недель: тогда `off = (VAL - a).days // 7` даёт блок, чей самый свежий день
+    РАВЕН якорю. Раньше это было записано комментарием и ничем не проверялось.
+
+    Якорь ВНЕ сетки ломает это молча и в опасную сторону. Пример с диска: для
+    2025-12-22 (понедельник, 23 дня до VAL) off = 3, а неделя 3 покрывает
+    18–24.12 — то есть в признаки якоря попадают 23 и 24 декабря, ПОСЛЕ него,
+    и они же лежат в его целевом окне. Замерено: активность в этих двух днях
+    у 136 672 юзеров (54.7%) на 2.02 млн GMV. То же у 2025-12-29 и 2026-01-05.
+    Val-скор к этому иммунен (такие якоря попадают в gap, а gap участвует только в
+    ретрейне под тест), поэтому обычная сверка по валидации дефект не видит.
+
+    Поэтому off-grid якоря из плана исключаются, громко и по имени. `strict_grid=False`
+    оставлен для диагностики — считать на нём что-либо для сдачи нельзя.
+    """
     avail = available_train_anchors()
+    if strict_grid:
+        off_grid = [a for a in avail if not on_val_week_grid(a)]
+        if off_grid:
+            log("ВНИМАНИЕ: якоря вне 7-дневной сетки VAL исключены из плана "
+                "(их недельный блок захватывал бы дни ПОСЛЕ якоря): "
+                + ", ".join(f"{a} (+{(VAL_ANCHOR - a).days % 7}д)" for a in off_grid))
+        avail = [a for a in avail if on_val_week_grid(a)]
     cutoff = VAL_ANCHOR - timedelta(days=GAP_DAYS)
     return {"fit": [a for a in avail if a <= cutoff][-N_TRAIN_ANCHORS:],
             "gap": [a for a in avail if cutoff < a < VAL_ANCHOR],

@@ -471,8 +471,21 @@ def _torch_device() -> str:
 
 
 def _apply_stats(mod, X: np.ndarray, stats_file: Path) -> None:
-    z = np.load(stats_file)
-    mod.apply_stats(X, {k: z[k] for k in ("med", "lo", "hi", "mean", "std")})
+    """Препроцессинг ровно тот, каким модель обучена.
+
+    Раньше отсюда передавались только med/lo/hi/mean/std, а ключ `mode` (и таблицы
+    режима rank) отбрасывался. featprep.mode_of при отсутствии `mode` возвращает
+    "clip99", поэтому модель, обученная с --feat-prep signlog|rank, на инференсе
+    молча получила бы ДРУГОЙ препроцессинг. В действующем бленде все члены на clip99,
+    так что это не срабатывало, но флаг живой и цена ошибки — тихо неверный прогноз.
+    Передаём весь npz как есть; лишние ключи apply_stats игнорирует.
+    """
+    z = np.load(stats_file, allow_pickle=True)
+    s = {k: z[k] for k in z.files}
+    missing = [k for k in ("med", "lo", "hi", "mean", "std") if k not in s]
+    if missing:
+        raise MissingArtifact(f"{stats_file.name}: нет ключей {missing}")
+    mod.apply_stats(X, s)
 
 
 def predict_mlp_family(base: str, meta: dict, X: np.ndarray) -> np.ndarray:
@@ -713,12 +726,31 @@ def silence_p_test() -> np.ndarray:
     смесь логрегрессии и бустинга 50/50.
     """
     import polars as pl
+    uid_ref = np.load(CACHE_DIR / "user_ids.npy") if (CACHE_DIR / "user_ids.npy").exists() else None
     for d in (MODELS_DIR, WORK_MODELS):
         p = d / "silence_p_test.npz"
         if p.exists():
             z = np.load(p)
-            log(f"молчание: беру готовое p из {p} (среднее {z['p'].mean():.5f})")
-            return z["p"]
+            # ВЫРАВНИВАНИЕ, а не вера в него. Весь конвейер работает на user_id,
+            # отсортированных по возрастанию (stage_predict сортирует явно), а p
+            # приходит в порядке строк anchor-паркета. Сейчас порядки совпадают, но
+            # это было единственное место шага 6, где совпадение НЕ проверялось, —
+            # а цена рассинхрона здесь равна всей поправке на молчащих (0.00084,
+            # крупнейший измеренный выигрыш проекта).
+            pv = z["p"]
+            if "user_id" in z.files and uid_ref is not None:
+                uid_p = z["user_id"]
+                if not np.array_equal(uid_p, uid_ref):
+                    order = np.argsort(uid_p)
+                    if not np.array_equal(uid_p[order], uid_ref):
+                        raise MissingArtifact(
+                            f"{p}: набор user_id не совпадает с {CACHE_DIR / 'user_ids.npy'}")
+                    pv = pv[order]
+                    log(f"молчание: p переставлено в порядок user_id прогона")
+            elif uid_ref is not None:
+                log(f"ВНИМАНИЕ: в {p.name} нет user_id — выравнивание не проверено")
+            log(f"молчание: беру готовое p из {p} (среднее {pv.mean():.5f})")
+            return pv
 
     log("молчание: готового p нет — обучаю модель (5 якорей, ~10 мин)")
     os.environ.update(USE_V2="1", USE_V3="1", USE_V4="1")
@@ -763,6 +795,12 @@ def silence_p_test() -> np.ndarray:
             f"среднее p {p.mean():.5f}")
         parts.append(p)
     p_te = 0.5 * parts[0] + 0.5 * parts[1]
+    if uid_ref is not None and not np.array_equal(uid_te, uid_ref):
+        order = np.argsort(uid_te)
+        if not np.array_equal(uid_te[order], uid_ref):
+            raise MissingArtifact("модель молчания обучена на другом наборе user_id")
+        uid_te, p_te = uid_te[order], p_te[order]
+        log("молчание: p переставлено в порядок user_id прогона")
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     np.savez(MODELS_DIR / "silence_p_test.npz", user_id=uid_te, p=p_te)
     log(f"молчание: записан {MODELS_DIR / 'silence_p_test.npz'}")
@@ -857,9 +895,19 @@ def stage_freeze() -> None:
 
 # ============================== СТАДИЯ: CHECK ================================ #
 
-def stage_check(verify_blend: bool = False) -> int:
-    """Что есть, чего не хватает и какой командой каждое получается."""
+def stage_check(verify_blend: bool = False) -> tuple[int, int]:
+    """Что есть, чего не хватает и какой командой каждое получается.
+
+    Возвращает (всего не хватает, из них БЛОКИРУЮЩИХ). Блокирующее — то, чего
+    последующие стадии этого же прогона произвести не могут: веса/прогнозы базовых
+    моделей (нужно обучение), таблицы калибровки, замороженная цепочка, входные файлы.
+    Признаки, тензоры и модель молчания блокирующими НЕ считаются: их собирают
+    стадии features и silence. Раньше check возвращал одно число, run_inference.sh
+    гейтил на нём весь конвейер, и «инференс одной командой» на чистом клоне падал
+    ДО стадии, которая как раз и собрала бы недостающее.
+    """
     miss: list[str] = []
+    blocking: list[str] = []
     print(f"OZON_ROOT:  {ROOT}")
     print(f"MODELS_DIR: {MODELS_DIR}")
     print(f"work/models:{WORK_MODELS}")
@@ -870,6 +918,7 @@ def stage_check(verify_blend: bool = False) -> int:
         print(f"  {f:<24} {'есть' if ok else 'НЕТ'}")
         if not ok:
             miss.append(f"входной файл {f}")
+            blocking.append(f"входной файл {f}")
 
     print("\n=== 2. признаки и тензоры ===")
     print(f"  якоря: тест {TEST_ANCHOR_ISO}, валидация {VAL_ANCHOR_ISO}, "
@@ -905,6 +954,7 @@ def stage_check(verify_blend: bool = False) -> int:
                 seen_groups.add(g)
                 need_secs += spec["secs"]
             miss.append(f"модель {b}")
+            blocking.append(f"модель {b}")
         print(f"  {b:<18}{contrib[b]:>7.4f}  {state:<9} {spec['secs'] // 60:>5}  {why}")
         if state != "готово":
             print(f"      {howto(b)}")
@@ -920,6 +970,7 @@ def stage_check(verify_blend: bool = False) -> int:
               + ("" if ok else f"   .venv/bin/python work/scripts/calibrate.py --pred {cal[:-4]}"))
         if not ok:
             miss.append(f"калибровка {cal}.npz (из {src})")
+            blocking.append(f"калибровка {cal}.npz")
 
     print("\n=== 5. замороженная цепочка (шаги 4-6) ===")
     ok = have(CHAIN_NPZ)
@@ -927,6 +978,7 @@ def stage_check(verify_blend: bool = False) -> int:
           + ("" if ok else "   .venv/bin/python final_submission/inference.py --stage freeze"))
     if not ok:
         miss.append(CHAIN_NPZ)
+        blocking.append(CHAIN_NPZ)
 
     print("\n=== 6. модель молчания (шаг 6) ===")
     ok = have("silence_p_test.npz")
@@ -961,7 +1013,11 @@ def stage_check(verify_blend: bool = False) -> int:
           f"(их суммарный вклад в бленд "
           f"{sum(contrib[b] for b in needed_bases() if base_state(b)[0] == 'готово'):.3f} "
           f"из {sum(BLEND_WEIGHTS.values()):.3f})")
-    print(f"всего не хватает артефактов: {len(miss)}")
+    print(f"всего не хватает артефактов: {len(miss)}"
+          + (f", из них блокирующих: {len(blocking)}" if miss else ""))
+    if miss and not blocking:
+        print("  ничего блокирующего: недостающее соберут стадии features/silence "
+              "этого же прогона")
     clean_secs, groups = 0, set()
     for b in needed_bases():
         spec = BASES[b]
@@ -984,7 +1040,7 @@ def stage_check(verify_blend: bool = False) -> int:
     if miss:
         print("\nПорядок восстановления: раздел 2 -> раздел 3 -> раздел 4 -> раздел 5.\n"
               "Полная последовательность с флагами — final_submission/reproduce_training.md.")
-    return len(miss)
+    return len(miss), len(blocking)
 
 
 # ================================== MAIN ===================================== #
@@ -1003,7 +1059,11 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.stage == "check":
-        return 1 if stage_check(args.verify_blend) else 0
+        # 0 — всё на месте; 1 — не хватает только восстановимого стадиями этого же
+        # прогона (признаки, тензоры, модель молчания); 2 — не хватает того, что
+        # прогон собрать не может (веса, калибровки, цепочка, входные файлы).
+        n_miss, n_block = stage_check(args.verify_blend)
+        return 2 if n_block else (1 if n_miss else 0)
     try:
         if args.stage == "freeze":
             stage_freeze()

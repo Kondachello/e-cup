@@ -240,7 +240,15 @@ def main():
     for a in anchors:
         p = FEATURES_DIR / f"anchor={a.isoformat()}.parquet"
         if p.exists():
-            print(f"  anchor {a}: exists, skip", flush=True)
+            # Готовый файл НИКОГДА не перезаписывается и не несёт отпечатка того, чем
+            # собран (какая версия скрипта, какой MAX_BACK). Поэтому «пересобрать
+            # признаки» на машине, где они уже лежат, не делает ничего — а расхождение
+            # между машинами потом ищут в моделях. Печатаем дату файла, чтобы это
+            # хотя бы было видно; для настоящей пересборки файл надо удалить.
+            import datetime as _dt
+            ts = _dt.datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            print(f"  anchor {a}: exists (собран {ts}, MAX_BACK текущего скрипта "
+                  f"{MAX_BACK}) — ПРОПУСК, файл не перезаписывается", flush=True)
             continue
         df = build_anchor(lf, universe, daily, a)
         df.write_parquet(p)

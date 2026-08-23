@@ -167,9 +167,9 @@ def main():
     v0 = load_anchor(VAL_ANCHOR)
     base_cols = [c for c in feature_cols(v0) if not c.startswith("v5")]
     uid = v0["user_id"].to_numpy()
-    assert (np.diff(uid) > 0).all() or True
     order = np.argsort(uid)
     uid = uid[order]
+    assert (np.diff(uid) > 0).all(), "user_id валидационного якоря не строго возрастает"
     n_wk, n_base = 5 * W_WEEKS, len(base_cols)
     p = n_wk + n_base
     WK = np.arange(n_wk)
@@ -178,6 +178,16 @@ def main():
     del v0
 
     grid_anchors = fit_a + gap_a + [VAL_ANCHOR]
+    # Второй рубеж к фильтру в anchor_plan: joint_block(Gv, off) даёт блок, чей самый
+    # свежий день равен якорю, ТОЛЬКО если якорь отстоит от VAL на целое число недель.
+    # Иначе в признаки якоря попадают дни ПОСЛЕ него — то есть начало его же целевого
+    # окна. Молчать здесь нельзя: val-скор такую утечку не показывает (она живёт в
+    # gap-якорях, а те входят лишь в ретрейн под тест).
+    bad_grid = [a for a in grid_anchors if (VAL_ANCHOR - a).days % 7]
+    assert not bad_grid, (
+        "якоря вне 7-дневной сетки VAL: "
+        + ", ".join(f"{a} (+{(VAL_ANCHOR - a).days % 7}д)" for a in bad_grid)
+        + " — их недельный блок захватил бы дни после якоря")
     max_off = max((VAL_ANCHOR - a).days // 7 for a in grid_anchors)
     Gv = weekly_dense(VAL_ANCHOR, max_off + W_WEEKS, uid)
     off = {a: (VAL_ANCHOR - a).days // 7 for a in grid_anchors}
@@ -248,8 +258,14 @@ def main():
         # Воспроизводимость: модель — это ровно вектор [beta, intercept] в сыром
         # пространстве, поэтому сохранить её стоит килобайт. Без этого *_val.parquet
         # не восстановить из чистого клона (inference.py --stage check: «прогноз-артефакт»).
-        save_npz(f"{name}_val", beta=b, cols=np.array(cols, dtype=object),
-                 alpha=np.array([best_alpha[tag]], dtype=np.float64))
+        # Сохраняем не только индексы колонок, но и их ИМЕНА и набор якорей: без
+        # этого артефакт не самоописывающий — применить beta на другом наборе
+        # признаков нельзя, а именно набор и плавает между машинами (196 против 203).
+        save_npz(f"{name}_val", beta=b, cols=np.array(cols, dtype=np.int64),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64),
+                 base_cols=np.array(base_cols, dtype=object),
+                 n_weekly=np.int64(n_wk), weeks=np.int64(W_WEEKS),
+                 fit_anchors=np.array([a.isoformat() for a in fit_a]))
         save_preds(name, "val", uid, np.expm1(lp))
         s = rmsle(yv_raw, np.expm1(lp))
         res[name] = {"val_rmsle": round(s, 6), "alpha": best_alpha[tag],
@@ -278,8 +294,11 @@ def main():
         b = solve(acc_full.A, acc_full.g, acc_full.n, cols, best_alpha[tag])
         lp = np.clip(Xt @ b[:-1] + b[-1], 0, None)
         # те же коэффициенты, что делают отгружаемый *_test.parquet
-        save_npz(f"{args.name + tag}_test", beta=b, cols=np.array(cols, dtype=object),
-                 alpha=np.array([best_alpha[tag]], dtype=np.float64))
+        save_npz(f"{args.name + tag}_test", beta=b, cols=np.array(cols, dtype=np.int64),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64),
+                 base_cols=np.array(base_cols, dtype=object),
+                 n_weekly=np.int64(n_wk), weeks=np.int64(W_WEEKS),
+                 fit_anchors=np.array([a.isoformat() for a in (fit_a + gap_a + [VAL_ANCHOR])]))
         save_preds(args.name + tag, "test", uid, np.expm1(lp))
         res[args.name + tag]["test_mean_logpred"] = round(float(lp.mean()), 4)
 

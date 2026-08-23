@@ -7,13 +7,18 @@ submissions/canonical/ (копии под исходными именами — 
 """
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-SUB = Path("/Users/alexanderkondakov/ozon-cup/submissions")
+# Корень репозитория: OZON_ROOT, иначе поднимаемся от этого файла.
+# Захардкоженный путь одной машины делал скрипт неработающим у всех
+# остальных членов команды и на чистом клоне.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
+SUB = ROOT / "submissions"
 CANON = SUB / "canonical"
 
 
@@ -48,7 +53,7 @@ def lp(name: str):
 
 def lp_pred(name: str):
     """log1p предсказаний модели из work/preds/NAME_test.parquet."""
-    p = Path("/Users/alexanderkondakov/ozon-cup/work/preds") / f"{name}_test.parquet"
+    p = ROOT / "work" / "preds" / f"{name}_test.parquet"
     d = pl.read_parquet(p).sort("user_id")
     return np.log1p(np.clip(d["pred"].to_numpy().astype(np.float64), 0, None))
 
