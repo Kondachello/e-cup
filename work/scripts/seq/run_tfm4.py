@@ -134,6 +134,13 @@ def main() -> int:
                   f"{r['rmsle_raw']:9.4f} "
                   + (f"{r['rmsle_tabless']:10.4f} {d:+9.4f}" if 'rmsle_tabless' in r
                      else f"{'—':>10} {'—':>9}"))
+        print("\nготовность (что очередь считает сделанным):")
+        for r in rows:
+            st_a = done(root, r["tag"], preds, want_test=(r["phase"] == "B"), rows=a.rows)
+            need = [] if r["tab_off"] else ["cal_tabless"]
+            miss = [k for k in need if k not in r]
+            print(f"  {r['tag']:22} {'готов' if st_a else 'БУДЕТ ПЕРЕЗАПУЩЕН'}"
+                  + (f"   нет полей: {miss}" if miss else ""))
         withtab = [r for r in rows if not r["tab_off"] and r["phase"] == "A"]
         ctrl = [r for r in rows if r["tab_off"] and r["phase"] == "A"]
         if withtab and ctrl:
