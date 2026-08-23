@@ -77,6 +77,7 @@ from common import (  # noqa: E402
 )
 from build_features_v5 import W_WEEKS, anchor_plan, joint_block, weekly_dense  # noqa: E402
 from exp_lib import log_score, save_preds  # noqa: E402
+from model_io import save_npz  # noqa: E402
 
 ALPHAS = [10.0 ** (k / 2) for k in range(-4, 15)]   # 0.01 .. 3.2e6, half-decade steps
 CHUNK = 50_000
@@ -244,6 +245,11 @@ def main():
         betas[tag] = b
         lp = np.clip(Xv @ b[:-1] + b[-1], 0, None)
         name = args.name + tag
+        # Воспроизводимость: модель — это ровно вектор [beta, intercept] в сыром
+        # пространстве, поэтому сохранить её стоит килобайт. Без этого *_val.parquet
+        # не восстановить из чистого клона (inference.py --stage check: «прогноз-артефакт»).
+        save_npz(f"{name}_val", beta=b, cols=np.array(cols, dtype=object),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64))
         save_preds(name, "val", uid, np.expm1(lp))
         s = rmsle(yv_raw, np.expm1(lp))
         res[name] = {"val_rmsle": round(s, 6), "alpha": best_alpha[tag],
@@ -271,6 +277,9 @@ def main():
     for tag, cols in sets.items():
         b = solve(acc_full.A, acc_full.g, acc_full.n, cols, best_alpha[tag])
         lp = np.clip(Xt @ b[:-1] + b[-1], 0, None)
+        # те же коэффициенты, что делают отгружаемый *_test.parquet
+        save_npz(f"{args.name + tag}_test", beta=b, cols=np.array(cols, dtype=object),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64))
         save_preds(args.name + tag, "test", uid, np.expm1(lp))
         res[args.name + tag]["test_mean_logpred"] = round(float(lp.mean()), 4)
 

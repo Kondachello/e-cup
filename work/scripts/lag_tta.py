@@ -38,6 +38,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from common import VAL_ANCHOR, feature_cols, load_anchor, rmsle
 from exp_lib import available_train_anchors, load_matrix, log_score, save_preds
+from model_io import save_lgb
 
 # Vintage = feature anchor read as a val forecast. LAG_DAYS names them by staleness.
 LAGS = (0, 14, 28, 42, 56, 70)
@@ -144,10 +145,16 @@ def main():
         it = m1.best_iteration
         print(f"two_stage: it1={it1} it2={m2.best_iteration}, train {time.time()-t0:.0f}s", flush=True)
         predict = lambda Z: np.clip(m1.predict(Z) * np.clip(m2.predict(Z), 0, None), 0, None)
+        # Воспроизводимость: без сохранённых весов *_val.parquet не восстановить из чистого
+        # клона, и модель остаётся «прогноз-артефактом» (inference.py --stage check). ОДНА
+        # обученная модель порождает ВСЕ винтажи, поэтому её и достаточно.
+        save_lgb(f"{args.prefix}_val", m1, tag="ts1")
+        save_lgb(f"{args.prefix}_val", m2, tag="ts2")
     else:
         m, it = fit(y, yv, dict(objective="tweedie", tweedie_variance_power=1.45, metric="rmse"))
         print(f"best_iteration={it}, train {time.time()-t0:.0f}s", flush=True)
         predict = lambda Z: np.clip(m.predict(Z), 0, None)
+        save_lgb(f"{args.prefix}_val", m, tag="tw")
     del X
 
     lp = {}   # name -> log1p-space prediction aligned to uid
@@ -220,10 +227,14 @@ def emit_test(args, cols, uid_val, val_iter):
         m2 = lgb.train(dict(base, objective="regression"), lgb.Dataset(X[pos], y[pos]),
                        num_boost_round=n_iter)
         predict = lambda Z: np.clip(m1.predict(Z) * np.clip(m2.predict(Z), 0, None), 0, None)
+        # те же веса, что делают отгружаемый *_test.parquet
+        save_lgb(args.test_name or f"{args.prefix}28", m1, tag="ts1")
+        save_lgb(args.test_name or f"{args.prefix}28", m2, tag="ts2")
     else:
         m = lgb.train(dict(base, objective="tweedie", tweedie_variance_power=1.45),
                       lgb.Dataset(X, y), num_boost_round=n_iter)
         predict = lambda Z: np.clip(m.predict(Z), 0, None)
+        save_lgb(args.test_name or f"{args.prefix}28", m, tag="tw")
     del X
 
     df = load_anchor(vintage, columns=["user_id"] + cols).sort("user_id")

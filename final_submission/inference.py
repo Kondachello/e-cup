@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -310,6 +311,30 @@ class MissingArtifact(RuntimeError):
     """Нет файла, без которого прогноз был бы мусором. Падаем громко."""
 
 
+def _persist_reason(base: str) -> str:
+    """Почему модель числится прогноз-артефактом — ПРОВЕРКОЙ, а не утверждением.
+
+    Прежний текст безусловно заявлял «в трейнере нет вызовов model_io.py». Для четырёх
+    членов семейства fusion (суммарный вес бленда 0.335) это неверно: train_fusion3.py
+    сохраняет веса четырьмя вызовами save_torch, и их артефакты — наследие прогонов ДО
+    того, как сохранение появилось. Ложная причина маскирует, что дыра закрывается одним
+    переобучением, а не переписыванием трейнера.
+    """
+    cmd = BASES[base].get("cmd") or ""
+    m = re.search(r"work/scripts/(\w+)\.py", cmd)
+    if not m:
+        return "внешняя модель, собирается вне этого пакета"
+    src = ROOT / "work" / "scripts" / f"{m.group(1)}.py"
+    try:
+        text = src.read_text(encoding="utf-8")
+    except OSError:
+        return f"трейнер {m.group(1)}.py недоступен, причина не проверена"
+    if re.search(r"save_torch\(|save_lgb\(|save_xgb\(|save_cb\(|save_booster\(|save_npz\(", text):
+        return (f"трейнер {m.group(1)}.py СОХРАНЯЕТ веса — артефакт остался от прогона до "
+                f"этой правки; достаточно переобучить")
+    return f"трейнер {m.group(1)}.py не сохраняет веса (нет вызовов model_io.py)"
+
+
 def howto(base: str) -> str:
     b = BASES.get(base)
     if not b:
@@ -352,7 +377,7 @@ def base_state(base: str) -> tuple[str, str]:
                 f"{spec['secs'] // 60} мин" if not cached else "прогноз в work/preds")
     if spec["persist"] == "preds":
         return ("готово" if cached else "НЕТ",
-                "прогноз-артефакт (трейнер не сохраняет веса)")
+                "прогноз-артефакт; " + _persist_reason(base))
     if not have(f"{base}_meta.json"):
         return ("кэш" if cached else "НЕТ", "нет meta" + (", есть кэш прогноза" if cached else ""))
     need = load_meta(base).get("weights") or []
@@ -537,8 +562,7 @@ def cached_pred(base: str, why: str) -> tuple[np.ndarray, np.ndarray]:
         raise MissingArtifact(
             f"НЕ ХВАТАЕТ ПРОГНОЗА: {p}  ({why})\n"
             f"  создаётся: {howto(base)}\n"
-            f"  ~{BASES[base]['secs'] // 60} мин; трейнер этой модели не сохраняет веса "
-            f"(в нём нет вызовов work/scripts/model_io.py), поэтому её артефакт — сам прогноз.")
+            f"  ~{BASES[base]['secs'] // 60} мин; {_persist_reason(base)}.")
     d = pl.read_parquet(p).sort("user_id")
     return d["pred"].to_numpy().astype(np.float64), d["user_id"].to_numpy()
 
