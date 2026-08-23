@@ -29,3 +29,8 @@ from_gpu/
 _to_kosta/
 runlogs/
 COMMIT_MSG.txt
+
+# tfm4: кэш таблицы и статистики нормировки (тяжёлые, пересобираются prep)
+tab_raw.*
+tabstats_*.json
+result_*.json
