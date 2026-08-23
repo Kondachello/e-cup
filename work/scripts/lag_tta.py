@@ -37,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import VAL_ANCHOR, feature_cols, load_anchor, rmsle
-from exp_lib import available_train_anchors, load_matrix, log_score, save_preds
+from exp_lib import available_train_anchors, load_matrix, log_score, note, save_preds
 from model_io import save_lgb
 
 # Vintage = feature anchor read as a val forecast. LAG_DAYS names them by staleness.
@@ -111,6 +111,10 @@ def main():
     val = load_anchor(VAL_ANCHOR).sort("user_id")
     cols = feature_cols(val)
     print(f"{len(cols)} features", flush=True)
+    # Число обучающих якорей val-стороны задаёт множитель итераций тестового
+    # переобучения, а сам набор берётся с диска — записываем оба факта.
+    note(n_val_anchors=len(tr_anchors), n_features=len(cols), lags=args.lags,
+         objective=args.objective, seed=args.seed, train_cutoff=gap_cut.isoformat())
 
     tr = load_matrix(tr_anchors, columns=["target"] + cols)
     X = tr.select(cols).to_numpy().astype(np.float32)
@@ -234,6 +238,8 @@ def emit_test(args, cols, uid_val, val_iter, n_val_anchors: int):
     n_iter = max(50, int(val_iter * iter_mult))
     print(f"test: якорей {len(anchors)} против {n_val_anchors} на val -> "
           f"row_ratio={row_ratio:.3f} iter_mult={iter_mult:.3f} n_iter={n_iter}", flush=True)
+    note(n_test_anchors=len(anchors), iter_mult=round(iter_mult, 4), test_n_iter=n_iter,
+         test_vintage=args.test_vintage)
     print(f"test: {X.shape[0]} строк, {n_iter} итераций (val it={val_iter}), "
           f"objective={args.objective}", flush=True)
     if args.objective == "two_stage":

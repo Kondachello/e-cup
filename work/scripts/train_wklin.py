@@ -76,7 +76,7 @@ from common import (  # noqa: E402
     FEATURES_DIR, REPORTS_DIR, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor, rmsle,
 )
 from build_features_v5 import W_WEEKS, anchor_plan, joint_block, weekly_dense  # noqa: E402
-from exp_lib import log_score, save_preds  # noqa: E402
+from exp_lib import log_score, note, save_preds  # noqa: E402
 from model_io import save_npz  # noqa: E402
 
 ALPHAS = [10.0 ** (k / 2) for k in range(-4, 15)]   # 0.01 .. 3.2e6, half-decade steps
@@ -175,14 +175,23 @@ def main():
     WK = np.arange(n_wk)
     BS = np.arange(n_wk, p)
     log(f"design: {n_wk} weekly + {n_base} base = {p} columns")
+    # Набор якорей — доказанно решающая переменная воспроизведения этой модели
+    # (сверка 23.08), поэтому он идёт в отпечаток явно, а не только как каталог.
+    note(n_fit_anchors=len(fit_a), n_gap_anchors=len(gap_a), n_features=p,
+         n_base_features=n_base, weeks=W_WEEKS,
+         fit_anchors=[a.isoformat() for a in fit_a],
+         gap_anchors=[a.isoformat() for a in gap_a])
     del v0
 
     grid_anchors = fit_a + gap_a + [VAL_ANCHOR]
     # Второй рубеж к фильтру в anchor_plan: joint_block(Gv, off) даёт блок, чей самый
     # свежий день равен якорю, ТОЛЬКО если якорь отстоит от VAL на целое число недель.
     # Иначе в признаки якоря попадают дни ПОСЛЕ него — то есть начало его же целевого
-    # окна. Молчать здесь нельзя: val-скор такую утечку не показывает (она живёт в
-    # gap-якорях, а те входят лишь в ретрейн под тест).
+    # окна. На каноническом наборе таких якорей нет и никогда не было в отгружаемых
+    # артефактах; это страховка от повторения эксперимента 20.08 с цензурированными
+    # якорями. Молчать всё же нельзя: val-скор такую утечку не показывает (off-grid
+    # якорь при cutoff = VAL-30 всегда попадает в gap), а тестовая сторона ниже пулит
+    # fit + gap + VAL, то есть gap уезжает в сабмит.
     bad_grid = [a for a in grid_anchors if (VAL_ANCHOR - a).days % 7]
     assert not bad_grid, (
         "якоря вне 7-дневной сетки VAL: "

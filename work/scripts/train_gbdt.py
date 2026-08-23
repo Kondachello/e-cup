@@ -45,7 +45,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from calibrate import apply_shifts, fit_shifts
 from common import VAL_ANCHOR, TEST_ANCHOR, rmsle, load_anchor, feature_cols
-from exp_lib import available_train_anchors, load_matrix, save_preds, log_score
+from exp_lib import available_train_anchors, load_matrix, note, save_preds, log_score
 from model_io import booster_filename, save_booster, save_meta
 
 RETRAIN_ITER_MULT = 1.07
@@ -298,6 +298,13 @@ def main():
         drop = set(args.drop_cols.split(","))
         cols = [c for c in cols if c not in drop]
     print(f"{len(cols)} features", flush=True)
+    # ЭФФЕКТИВНЫЕ параметры в отпечаток: умолчание --gap-days сменилось с 0 на 30,
+    # поэтому одна и та же архивная команда до и после обучает РАЗНОЕ, а argv этого
+    # не покажет — там только явно переданное.
+    note(gap_days=args.gap_days, n_train_anchors=len(tr_anchors), n_features=len(cols),
+         model=args.model, objective=args.objective, seed=args.seed,
+         es_metric=args.es_metric, n_anchors_flag=args.n_anchors or None,
+         active_only=bool(args.active_only) or None)
 
     tr = load_matrix(tr_anchors, columns=["user_id", "anchor_date", "target"] + cols)
     if args.active_only:

@@ -71,6 +71,19 @@ def save_preds(name: str, split: str, user_ids: np.ndarray, preds: np.ndarray):
         pass
 
 
+def note(**kv):
+    """Сообщить провенансу ЭФФЕКТИВНЫЕ параметры прогона (см. provenance.note).
+
+    Трейнеры зовут это, а не provenance напрямую: ошибка стемпинга не должна
+    ронять обучение, и глушится она в одном месте.
+    """
+    try:
+        from provenance import note as _n
+        _n(**kv)
+    except Exception:
+        pass
+
+
 def log_score(name: str, val_rmsle: float, notes: str = ""):
     path = REPORTS_DIR / "scores.tsv"
     with open(path, "a") as f:

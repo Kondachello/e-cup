@@ -25,6 +25,19 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CACHE: dict[str, str] = {}
+_RUN: dict = {}
+
+
+def note(**kv) -> None:
+    """Эффективные факты прогона: то, чего не видно ни в argv, ни в окружении.
+
+    argv записывает только ЯВНО переданное. Поэтому смена умолчания флага делает
+    отпечаток лживым задним числом: архивная команда без `--gap-days` до 23.08
+    обучала без зазора, а после — с зазором 30, и argv в обоих случаях одинаков.
+    Трейнер обязан сообщить ЭФФЕКТИВНОЕ значение сам; здесь оно и копится до
+    ближайшего stamp().
+    """
+    _RUN.update({k: v for k, v in kv.items() if v is not None})
 # Тиры признаков включаются переменными окружения — их состав меняет входную матрицу
 # и потому обязан попадать в отпечаток.
 _TIER_ENV = ("USE_V2", "USE_V3", "USE_V4", "USE_V5", "USE_V6", "USE_V7", "USE_V8", "USE_V10")
@@ -98,6 +111,7 @@ def snapshot(extra: dict | None = None) -> dict:
         "argv": " ".join(sys.argv[:12]),
         "tiers_enabled": tiers,
         "tiers_on_disk": _tiers_on_disk(feats, anchors),
+        "run": dict(_RUN),
         "anchors_on_disk": anchors,
         "n_anchors_on_disk": len(anchors),
         "versions": _versions(),
@@ -129,12 +143,13 @@ def diff(a: str | Path, b: str | Path) -> None:
         if va == vb:
             same += 1
             continue
-        if k == "tiers_on_disk":
-            keys = sorted(set(va or {}) | set(vb or {}))
-            for t in keys:
+        if k in ("tiers_on_disk", "run"):
+            # ВНИМАНИЕ: имя внутренней переменной НЕ keys — оно затирало переменную
+            # внешнего цикла и портило итоговый счётчик
+            for t in sorted(set(va or {}) | set(vb or {})):
                 x, y = (va or {}).get(t), (vb or {}).get(t)
                 if x != y:
-                    print(f"РАЗЛИЧИЕ {k}[{t}]: слева {x} якорей, справа {y}")
+                    print(f"РАЗЛИЧИЕ {k}[{t}]: слева {x}, справа {y}")
         elif k == "anchors_on_disk":
             only_a = [x for x in (va or []) if x not in (vb or [])]
             only_b = [x for x in (vb or []) if x not in (va or [])]
