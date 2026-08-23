@@ -58,6 +58,15 @@ def save_preds(name: str, split: str, user_ids: np.ndarray, preds: np.ndarray):
     pl.DataFrame({"user_id": user_ids.astype(np.int64), "pred": preds}).write_parquet(
         PREDS_DIR / f"{name}_{split}.parquet"
     )
+    # Происхождение рядом с прогнозом: набор якорей, включённые тиры, версии библиотек,
+    # хеш train.parquet, коммит. Без этого артефакт не помнит, из чего собран, и вопрос
+    # «почему не воспроизводится» неразрешим (см. work/scripts/provenance.py).
+    # Стемпинг не имеет права уронить обучение, поэтому все ошибки глушатся внутри.
+    try:
+        from provenance import stamp
+        stamp(name, split, PREDS_DIR)
+    except Exception:
+        pass
 
 
 def log_score(name: str, val_rmsle: float, notes: str = ""):
