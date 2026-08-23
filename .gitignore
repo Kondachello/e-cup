@@ -34,3 +34,6 @@ COMMIT_MSG.txt
 tab_raw.*
 tabstats_*.json
 result_*.json
+
+# перенос на GPU-машину
+_to_gpu/

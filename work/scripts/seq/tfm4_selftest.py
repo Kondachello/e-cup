@@ -170,8 +170,16 @@ def run() -> int:
         check(np.isfinite(r), f'фаза A досчиталась, val RMSLE {r:.4f}')
         if HAVE_POLARS:
             check((tmp / 'preds' / 'st_val.parquet').exists(), 'выгрузка val записана')
+            check((tmp / 'preds' / 'st_tabless_val.parquet').exists(),
+                  'ствол без таблицы выгружен отдельным файлом')
+            import polars as _pl
+            _a = _pl.read_parquet(tmp / 'preds' / 'st_val.parquet')['pred'].to_numpy()
+            _b = _pl.read_parquet(tmp / 'preds' / 'st_tabless_val.parquet')['pred'].to_numpy()
+            check(not np.allclose(_a, _b), 'выгрузки совместной модели и ствола различаются')
         else:
             print('  ~     polars нет: проверка выгрузки parquet пропущена')
+        _r = json.loads((tmp / 'result_st.json').read_text(encoding='utf-8'))
+        check('cal_tabless' in _r, 'усадка ствола записана в result json')
         check((tmp / 'val_logpred_st_tabless.npy').exists(), 'сохранён прогноз без таблицы')
 
         print('\n6. контроль равной ёмкости (--tab-off) на той же сетке')
@@ -236,6 +244,17 @@ def run() -> int:
                 tfm4.main(ar); check(True, f'--check-init-only --steps 0 {tail[0]}: вышел чисто')
             except Exception as e:
                 check(False, f'--check-init-only --steps 0 {tail[0]}: {type(e).__name__}: {e}')
+        # фаза B с таблицей, но без усадки ствола
+        at = p.parse_args(['--data', str(tmp / 'tensor'), '--tab-cache', str(tmp / 'tab_raw.f16'),
+                           '--phase', 'B', '--tag', 'stt', '--fixed-steps', '10',
+                           '--cal-fixed', '0.93', '--channels', '32', '--layers', '1',
+                           '--heads', '2', '--batch', '64', '--minutes', '0', '--workers', '1',
+                           '--no-plots', '--val-users', '50', '--no-val-all', '--tab-dim', '16'])
+        at.ckpt = str(tmp / 'model_stt.pt')
+        try:
+            tfm4.main(at); check(False, 'фаза B без --cal-fixed-tabless пропущена')
+        except SystemExit:
+            check(True, 'фаза B без --cal-fixed-tabless отклонена')
         # фаза B без --cal-fixed подбирала бы усадку на протекшем якоре
         ac = p.parse_args(['--data', str(tmp / 'tensor'), '--tab-cache', str(tmp / 'tab_raw.f16'),
                            '--phase', 'B', '--tag', 'stc', '--fixed-steps', '10'])

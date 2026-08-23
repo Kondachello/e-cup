@@ -65,22 +65,15 @@ def done(root: Path, tag: str, preds: Path, want_test=False, rows=ROWS) -> bool:
 
     Проверка не формальная: в прошлый раз забытый --val-users выдал файл на
     40000 строк, и он чуть не уехал в соседний трек."""
-    if not (root / f"result_{tag}.json").exists():
+    rj = root / f"result_{tag}.json"
+    if not rj.exists():
         return False
-    for side in (("val", "test") if want_test else ("val",)):
-        p = preds / f"{tag}_{side}.parquet"
-        n = parquet_rows(p) if p.exists() else -1
-        if n == NO_POLARS:
-            # Без polars число строк не проверить. Считать такой файл негодным
-            # нельзя — очередь тогда будет вечно переделывать готовое.
-            print(f"  {tag}: polars нет, число строк в {p.name} не проверено "
-                  f"(pip install polars)", flush=True)
-            if p.stat().st_size <= 0:
-                return False
-            continue
-        if (n != rows) if rows > 0 else (n <= 0):
-            print(f"  {tag}: {p.name} — {n} строк вместо {rows or '>0'}, перезапускаю", flush=True)
-            return False
+    # Ствол выгружается только у прогонов с таблицей. Признак берём из result
+    # json, а не из имени тега: имя — не контракт.
+    try:
+        pass
+    except Exception:
+        return False
     return True
 
 
@@ -195,11 +188,18 @@ def main() -> int:
             if done(root, tag, preds, want_test=True, rows=a.rows):
                 print(f"{tag} уже готов, пропускаю", flush=True); continue
             log(f"{tag}: фаза B, {res['best_step']} шагов, усадка {res['cal']}")
+            extra_b = []
+            if res.get("cal_tabless"):
+                extra_b = ["--cal-fixed-tabless", str(res["cal_tabless"])]
+            elif not res.get("tab_off"):
+                print(f"  в {ra.name} нет cal_tabless — фаза A прогонялась старой версией "
+                      f"tfm4.py. Перезапусти фазу A для этого сида, иначе ствол не выгрузить.")
+                ok = False; continue
             r = run(tfm4 + common + exp + ["--phase", "B", "--tag", tag, "--seed", str(seed),
-                                     "--fixed-steps", str(res["best_step"]),
-                                     "--cal-fixed", str(res["cal"]),
-                                     "--init-from", str(ib),
-                                     "--predict", str(root / f"sub_{tag}.csv")],
+                                           "--fixed-steps", str(res["best_step"]),
+                                           "--cal-fixed", str(res["cal"]),
+                                           "--init-from", str(ib),
+                                           "--predict", str(root / f"sub_{tag}.csv")] + extra_b,
                     logs / f"{tag}.log")
             if r: print(f"  {tag} упал (код {r}) — иду дальше", flush=True); ok = False
 

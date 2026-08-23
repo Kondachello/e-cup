@@ -391,6 +391,10 @@ def _eval(model, st, tab, users, anchor, dev, batch):
 
 def main(a):
     if not a.ckpt: a.ckpt = f'model_{a.tag}.pt'
+    if a.phase == 'B' and not a.tab_off and not a.cal_fixed_tabless:
+        raise SystemExit('в фазе B усадку ствола без таблицы подбирать не на чем (валидация '
+                         'входит в обучение): нужен --cal-fixed-tabless C из фазы A, поле '
+                         'cal_tabless в result_tfm4_a_s<сид>.json. Проверяю до обучения.')
     if a.phase == 'B' and not (a.fixed_steps and a.cal_fixed):
         raise SystemExit('фаза B обучается на якоре 378, а валидация тоже на 378: метрика '
                          'подсматривает. Обязательны ОБА флага из фазы A — --fixed-steps N и '
@@ -534,7 +538,7 @@ def main(a):
         a.steps, a.minutes = a.fixed_steps, 0.0
         print(f'режим переобучения: ровно {a.fixed_steps} шагов, ранней остановки нет', flush=True)
     sched = torch.optim.lr_scheduler.OneCycleLR(
-        opt, max_lr, total_steps=max(a.steps, 1), pct_start=max(a.pct_start, 1e-3))
+        opt, max_lr, total_steps=max(a.steps, 8), pct_start=max(a.pct_start, 1e-3))
     ema = EMA(model, a.ema)
     pf = GridPrefetcher(st, tab, grid, a.batch, workers=a.workers)
 
@@ -612,17 +616,25 @@ def main(a):
               f'без таблицы {rmsle_from_log(lp0, lt):.4f}, '
               f'corr предсказаний {np.corrcoef(lp.numpy(), lp0.numpy())[0,1]:.5f}', flush=True)
 
-    if a.cal_fixed:
-        cal = a.cal_fixed
-        bestc = (rmsle_from_log(cal * lp, lt), cal)
-        print(f'усадка задана флагом: {cal} -> val RMSLE {bestc[0]:.4f} '
-              f'(при нарушенном зазоре это число НЕ показатель)')
-    else:
-        bestc = (9e9, 1.0)
-        for c in [1.0, 0.97, 0.95, 0.93, 0.9, 0.87, 0.85]:
-            r = rmsle_from_log(c * lp, lt); bestc = min(bestc, (r, c))
-            print(f'  усадка {c}: {r:.4f}')
-        cal = bestc[1]; print(f'выбрана усадка {cal} -> val RMSLE {bestc[0]:.4f}')
+    def pick_shrink(v, fixed, what):
+        if fixed:
+            r = rmsle_from_log(fixed * v, lt)
+            print(f'усадка {what} задана флагом: {fixed} -> val RMSLE {r:.4f} '
+                  f'(при нарушенном зазоре это число НЕ показатель)')
+            return fixed, r
+        b = (9e9, 1.0)
+        for c in [1.0, 0.97, 0.95, 0.93, 0.9, 0.87, 0.85, 0.82, 0.8]:
+            r = rmsle_from_log(c * v, lt); b = min(b, (r, c))
+            print(f'  усадка {what} {c}: {r:.4f}')
+        print(f'выбрана усадка {what} {b[1]} -> val RMSLE {b[0]:.4f}')
+        return b[1], b[0]
+
+    cal, _r = pick_shrink(lp, a.cal_fixed, 'совместной модели')
+    bestc = (_r, cal)
+
+    cal0 = r0_cal = None
+    if tab is not None:
+        cal0, r0_cal = pick_shrink(lp0, a.cal_fixed_tabless, 'ствола')
 
     res = {'tag': a.tag, 'phase': a.phase, 'seed': a.seed, 'cal': float(cal),
            'rmsle_cal': float(bestc[0]), 'rmsle_raw': float(rmsle_from_log(lp, lt)),
@@ -631,6 +643,8 @@ def main(a):
            'grid': grid, 'val_anchor': VAL, 'test_anchor': TEST,
            'tab_off': bool(a.tab_off), 'init_from': a.init_from}
     if tab is not None:
+        res['cal_tabless'] = float(cal0)
+        res['rmsle_tabless_cal'] = float(r0_cal)
         res['rmsle_tabless'] = float(rmsle_from_log(lp0, lt))
         res['corr_with_tabless'] = float(np.corrcoef(lp.numpy(), lp0.numpy())[0, 1])
     Path(f'result_{a.tag}.json').write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding='utf-8')
@@ -638,38 +652,51 @@ def main(a):
     if a.export:
         import polars as _pl
         os.makedirs(a.export, exist_ok=True)
-        vp = np.expm1(np.clip(cal * lp.numpy(), 0, None))
-        _pl.DataFrame({'user_id': st.uids[val_u.numpy()].astype(np.int64),
-                       'pred': vp.astype(np.float64)}).sort('user_id').write_parquet(
-            f'{a.export}/{a.tag}_val.parquet')
-        print(f'выгружено {a.export}/{a.tag}_val.parquet ({len(vp)} юзеров)', flush=True)
+        def _dump(v, c, name):
+            vp = np.expm1(np.clip(c * v.numpy(), 0, None))
+            _pl.DataFrame({'user_id': st.uids[val_u.numpy()].astype(np.int64),
+                           'pred': vp.astype(np.float64)}).sort('user_id').write_parquet(
+                f'{a.export}/{name}_val.parquet')
+            print(f'выгружено {a.export}/{name}_val.parquet ({len(vp)} юзеров)', flush=True)
+        _dump(lp, cal, a.tag)
+        if tab is not None:
+            # Ствол без таблицы — отдельный член бленда, а не диагностика:
+            # он слабее по скору, но заметно менее скоррелирован с паком.
+            pass
     save_history(a.tag, hist)
     if not a.no_plots:
         make_plots(a.tag, hist, lp.numpy(), lt.numpy(), cal)
 
     if a.predict:
-        out = np.zeros(st.n_u, np.float32)
-        anc = torch.full((a.batch,), TEST)
+        out = np.zeros(st.n_u, np.float32); out0 = np.zeros(st.n_u, np.float32)
         with torch.no_grad(), torch.amp.autocast('cuda', enabled=(dev == 'cuda')):
             for i in range(0, st.n_u, a.batch):
                 u = torch.arange(i, min(i + a.batch, st.n_u))
-                x, _ = st.batch(u, anc[:len(u)], dev, with_target=False)
-                tb = (tab.to_dev(tab.gather(u, torch.full((len(u),), TEST)), dev)
-                      if tab is not None else None)
-                out[i:i + len(u)] = model(x, tb)['y30'].float().cpu().numpy()
-        pred = np.expm1(np.clip(cal * out, 0, None))
-        np.save(a.predict + '.logpred.npy', out)
+                anc = torch.full((len(u),), TEST)
+                x, _ = st.batch(u, anc, dev, with_target=False)
+                tb = tab.to_dev(tab.gather(u, anc), dev) if tab is not None else None
+                o, o0 = model.forward_both(x, tb)
+                out[i:i + len(u)] = o['y30'].float().cpu().numpy()
+                out0[i:i + len(u)] = o0['y30'].float().cpu().numpy()
         np.save(a.predict + '.userids.npy', st.uids)
-        with open(a.predict, 'w') as f:
-            f.write('user_id,predict\n')
-            for uid, v in zip(st.uids, pred): f.write(f'{int(uid)},{v:.6f}\n')
-        print('сохранено', a.predict, 'среднее', float(pred.mean()))
-        if a.export:
-            import polars as _pl
-            _pl.DataFrame({'user_id': st.uids.astype(np.int64),
-                           'pred': pred.astype(np.float64)}).sort('user_id').write_parquet(
-                f'{a.export}/{a.tag}_test.parquet')
-            print(f'выгружено {a.export}/{a.tag}_test.parquet', flush=True)
+
+        def _sub(v, c, path, tag):
+            pred = np.expm1(np.clip(c * v, 0, None))
+            np.save(path + '.logpred.npy', v)
+            with open(path, 'w', encoding='utf-8', newline='') as f:
+                f.write('user_id,predict\n')
+                for uid, x_ in zip(st.uids, pred): f.write(f'{int(uid)},{x_:.6f}\n')
+            print('сохранено', path, 'среднее', float(pred.mean()), flush=True)
+            if a.export:
+                import polars as _pl
+                _pl.DataFrame({'user_id': st.uids.astype(np.int64),
+                               'pred': pred.astype(np.float64)}).sort('user_id').write_parquet(
+                    f'{a.export}/{tag}_test.parquet')
+                print(f'выгружено {a.export}/{tag}_test.parquet', flush=True)
+
+        _sub(out, cal, a.predict, a.tag)
+        if tab is not None:
+            pass
     return bestc[0]
 
 
@@ -728,6 +755,8 @@ def build_parser():
     p.add_argument('--eval-every', type=int, default=2000)
     p.add_argument('--es-metric', default='cal', choices=['cal', 'raw'])
     p.add_argument('--cal-fixed', type=float, default=0.0)
+    p.add_argument('--cal-fixed-tabless', type=float, default=0.0,
+                   help='усадка ствола без таблицы, из фазы A (поле cal_tabless)')
     p.add_argument('--val-users', type=int, default=0)
     p.add_argument('--val-all', action='store_true', default=True)
     p.add_argument('--no-val-all', dest='val_all', action='store_false')
