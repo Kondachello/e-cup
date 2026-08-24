@@ -428,7 +428,7 @@ def main(a):
                  if vm.available < 6 * 2**30 else ''), flush=True)
     except ImportError:
         pass
-    st = Store(a.data, pin=(dev == 'cuda' and not a.no_pin),
+    st = Store(a.data, pin=(not a.no_pin and dev == 'cuda'),
                abs_time=a.abs_time, cohort3=not a.cohort1)
     st.to_device(dev)
 
@@ -757,6 +757,9 @@ def build_parser():
     p.add_argument('--tab-keep-degenerate', action='store_true')
     p.add_argument('--tab-keep-all', action='store_true')
     p.add_argument('--tab-ram', action='store_true', help='держать таблицу в RAM (+2.5 ГБ), а не в memmap')
+    p.add_argument('--no-pin', action='store_true',
+                   help='не закреплять тензор в памяти хоста (~2.9 ГБ). На Windows закрепление '
+                        'мешает драйверу подпирать выделения карты системной памятью')
     p.add_argument('--no-drift', action='store_true')
     p.add_argument('--tab-drift-use-test', action='store_true',
                    help='учитывать тестовый якорь при отсеве по сдвигу (по умолчанию только валидация)')

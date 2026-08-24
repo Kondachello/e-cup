@@ -231,6 +231,20 @@ def run() -> int:
         tb2 = tp2.to_dev(tp2.gather(torch.arange(8), torch.full((8,), tfm4.day_index(dates[-1]))), 'cpu')
         check(tuple(tb2.shape) == (8, tp2.n_tab), 'выборка после отсева нужной ширины')
 
+        print('\n7c2. каждый a.<флаг> в tfm4.py существует в разборщике аргументов')
+        # Ловит целый класс: обращение к флагу, которого нет. На CPU такие строки
+        # часто не выполняются (спрятаны за `dev == "cuda"`), и опечатка всплывает
+        # только на GPU-машине, посреди прогона.
+        import ast as _ast
+        src = (Path(__file__).resolve().parent / 'tfm4.py').read_text(encoding='utf-8')
+        used = {n.attr for n in _ast.walk(_ast.parse(src))
+                if isinstance(n, _ast.Attribute) and isinstance(n.value, _ast.Name)
+                and n.value.id == 'a'}
+        known = set(vars(tfm4.build_parser().parse_args([])))
+        gap = sorted(used - known)
+        check(not gap, f'нет несуществующих флагов (лишние: {gap})' if gap
+              else f'все {len(used)} обращений a.<флаг> покрыты разборщиком')
+
         print('\n7d. регрессии на баги, найденные ревью')
         # --steps 0 с --check-init-only должен выходить и при --tab-off
         for tail in (['--tab-off'], ['--no-check-init']):
