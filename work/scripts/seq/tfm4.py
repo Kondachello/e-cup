@@ -414,7 +414,22 @@ def main(a):
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
     torch.backends.cudnn.benchmark = True
 
-    st = Store(a.data, pin=(dev == 'cuda'), abs_time=a.abs_time, cohort3=not a.cohort1)
+    if dev == 'cuda':
+        free, total = torch.cuda.mem_get_info()
+        print(f'карта: {torch.cuda.get_device_name(0)}, свободно '
+              f'{free/2**30:.2f} из {total/2**30:.2f} ГБ', flush=True)
+        if free < 3.0 * 2**30:
+            print('  ВНИМАНИЕ: меньше 3 ГБ свободно на карте — проверь nvidia-smi.', flush=True)
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        print(f'память хоста: свободно {vm.available/2**30:.1f} из {vm.total/2**30:.1f} ГБ'
+              + ('  <- МАЛО. Закрепление тензора (~2.9 ГБ) может не пройти, пробуй --no-pin'
+                 if vm.available < 6 * 2**30 else ''), flush=True)
+    except ImportError:
+        pass
+    st = Store(a.data, pin=(dev == 'cuda' and not a.no_pin),
+               abs_time=a.abs_time, cohort3=not a.cohort1)
     st.to_device(dev)
 
     tab = None
@@ -551,14 +566,29 @@ def main(a):
         tb = tab.to_dev(raw['tab'], dev) if tab is not None else None
         if tb is not None and step < a.tab_warmup:
             tb = None
-        with torch.amp.autocast('cuda', enabled=(dev == 'cuda')):
-            p = model(x, tb)
-            loss = sum(W[k] * (F.binary_cross_entropy_with_logits(p[k], y[k]) if k == 'buy'
-                               else F.mse_loss(p[k], y[k])) for k in W)
-        opt.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
-        scaler.unscale_(opt); nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        _sc = scaler.get_scale(); scaler.step(opt); scaler.update()
+        try:
+            with torch.amp.autocast('cuda', enabled=(dev == 'cuda')):
+                p = model(x, tb)
+                loss = sum(W[k] * (F.binary_cross_entropy_with_logits(p[k], y[k]) if k == 'buy'
+                                   else F.mse_loss(p[k], y[k])) for k in W)
+            opt.zero_grad(set_to_none=True)
+            scaler.scale(loss).backward()
+            scaler.unscale_(opt); nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            _sc = scaler.get_scale(); scaler.step(opt); scaler.update()
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+            if 'out of memory' not in str(e).lower() and 'unknown error' not in str(e).lower():
+                raise
+            fr = torch.cuda.mem_get_info()[0] / 2**30 if dev == 'cuda' else 0
+            raise SystemExit(
+                f'отказ выделения на шаге {step} (свободно на карте {fr:.2f} ГБ).\n'
+                f'Если свободного много, а не дали десятки мегабайт — это НЕ нехватка '
+                f'видеопамяти, а отказ драйвера. На Windows это обычно память хоста: '
+                f'тензор закрепляется (~2.9 ГБ), и драйверу нечем подпереть выделения карты.\n'
+                f'  1. --no-pin       не закреплять тензор  <- пробовать первым\n'
+                f'  2. закрыть Chrome и прочее, что ест RAM\n'
+                f'  3. --workers 1    меньше закреплённых буферов батчей\n'
+                f'  4. --batch 256    вдвое меньше памяти карты (тогда --fixed-steps вдвое '
+                f'больше, чтобы число просмотренных примеров совпало)') from e
         if scaler.get_scale() >= _sc and sched.last_epoch < sched.total_steps - 1: sched.step()
         step += 1; ema.update(model, step)
 
@@ -580,6 +610,9 @@ def main(a):
             hist.append((step, float(loss.item()), r, float(opt.param_groups[0]['lr']), el / 60))
             if a.fixed_steps:
                 best = (r, step)
+                # Пишем на каждой оценке, а не только после цикла: иначе падение
+                # на предпоследнем шаге стоит всего прогона.
+                torch.save(ema.model.state_dict(), a.ckpt)
             elif r < best[0]:
                 best = (r, step); torch.save(ema.model.state_dict(), a.ckpt)
             # Скорость меряем ПОСЛЕ первой оценки: оценка идёт по всем 250000
