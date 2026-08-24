@@ -94,6 +94,8 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=ROWS,
                     help="сколько строк обязана иметь выгрузка (0 — только непустая)")
     ap.add_argument("--extra", nargs="*", default=[])
+    ap.add_argument("--no-ctrl", action="store_true",
+                    help="не гонять контрольную ветку --tab-off. Вопрос равной ёмкости\nзакрыт зондом сида 1, а к бленду контроль ничего не добавляет (замер 24.08:\nствол+joint G=+0.000859, с контролем +0.000856). Экономит 55 мин на сид.")
     # неизвестные флаги уходят в tfm4.py как есть: так можно писать
     #   run_tfm4.py --stage probe --minutes 55 --tab-lr-mult 0.5
     # не перечисляя каждый флаг обучения второй раз. Опечатку поймает tfm4.py.
@@ -193,8 +195,10 @@ def main() -> int:
             continue
 
         if a.stage in ("probe", "seeds"):
-            for tag, extra in ((f"tfm4_a_s{seed}", []),
-                               (f"tfm4off_a_s{seed}", ["--tab-off"])):
+            branches = [(f"tfm4_a_s{seed}", [])]
+            if not a.no_ctrl:
+                branches.append((f"tfm4off_a_s{seed}", ["--tab-off"]))
+            for tag, extra in branches:
                 if done(root, tag, preds, rows=a.rows):
                     print(f"{tag} уже готов, пропускаю", flush=True); continue
                 log(f"{tag}: фаза A, {a.minutes} мин")

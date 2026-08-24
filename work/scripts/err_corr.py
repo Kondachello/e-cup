@@ -1,8 +1,18 @@
 """Correlation of a model's validation errors with the current blend's errors.
 
-The project's bottleneck is model uniformity, not model quality: anything with
-error correlation below ~0.97 is valuable even if its own RMSLE is much worse.
-This is the acceptance metric for every new model.
+NOT an acceptance criterion, despite what this docstring said until 2026-08-21.
+For any model inside the blend's linear hull the correlation is identically
+sb/sm: it is fixed by the model's own score and carries no information about
+dissimilarity (the identity is verified to five decimals on 101 models). The old
+rule "error correlation below ~0.97 is valuable" was empty, and the team worked
+by it for a week.
+
+Acceptance is decided by ЗАПАС = sb/sm - corr, the share of the model outside the
+hull. `margin.py` prints it together with the exact contribution algebra, and a
+SET of candidates is measured only by `joint_gain.py`, because margins do not
+add up (lagd28 and hz_v1_surv are each worthless alone, +0.000135 together).
+This tool remains useful for the diagnostic pair - measured correlation against
+the identity it must equal - and for the honest two-way weight w*.
 
 Usage:
   python work/scripts/err_corr.py NAME [NAME2 ...]
@@ -23,7 +33,7 @@ import numpy as np
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import PREDS_DIR, VAL_ANCHOR, load_anchor, rmsle
+from common import PREDS_DIR, ROOT, VAL_ANCHOR, load_anchor, rmsle
 
 # Действующий честный бленд (val OOF 1.666718). Прежний эталон содержал gru_final
 # с весом 0.145 — модель, обученную до введения зазора 30 дней, её валидационный скор
@@ -33,6 +43,11 @@ BLEND = {"fusion_f_cal": 0.32, "c_ts2_s42_cal": 0.25, "mlpziln_cal": 0.12,
          "behavonly_cal": 0.08, "countaov_cal": 0.07, "seq2tr_f_cal": 0.07,
          "twl_v7_cal": 0.055, "hmmsim_cal": 0.028, "channel2_cal": 0.012}
 
+# Какой эталон реально взят в этом запуске. Раньше в JSON всегда уходил словарь
+# BLEND, даже когда счёт шёл по колонке пакета, — записанный отчёт приписывал
+# числа весам, которых в расчёте не было.
+BLEND_SOURCE = "hardcoded"
+
 
 def load_lp(path: Path, uid_ref: np.ndarray) -> np.ndarray:
     df = pl.read_parquet(path).sort("user_id")
@@ -41,6 +56,24 @@ def load_lp(path: Path, uid_ref: np.ndarray) -> np.ndarray:
 
 
 def blend_lp(uid_ref: np.ndarray) -> np.ndarray:
+    """Reference blend, preferring the pack column over the hardcoded weights above.
+
+    Bug found by track 5: rebuilding the blend from BLEND scores 1.666718 while the live
+    champion (`blend` column of work/preds_pack/val_preds.parquet) scores 1.666395. Since
+    margin = blend_score/model_score - corr, a weaker reference inflates the margin of
+    EVERY candidate by about +0.00019 - 8 noise units, enough to accept a dead model.
+    The pack column tracks the live blend; the hardcoded dict goes stale by construction.
+    """
+    global BLEND_SOURCE
+    pack = ROOT / "work" / "preds_pack" / "val_preds.parquet"
+    if pack.exists():
+        df = pl.read_parquet(pack).sort("user_id")
+        if "blend" in df.columns and np.array_equal(df["user_id"].to_numpy(), uid_ref):
+            BLEND_SOURCE = "pack"
+            return df["blend"].to_numpy().astype(np.float64)      # already log1p
+        print("ВНИМАНИЕ: пакет есть, но колонка blend не подошла — беру старые веса")
+    else:
+        print("ВНИМАНИЕ: пакета нет, эталон из захардкоженных весов (устаревает)")
     return sum(w * load_lp(PREDS_DIR / f"{n}_val.parquet", uid_ref) for n, w in BLEND.items())
 
 
@@ -48,6 +81,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*", help="model names -> work/preds/NAME_val.parquet")
     ap.add_argument("--file", action="append", default=[], help="explicit parquet path(s)")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="calibrate inside (cross-fit binned log-shifts) instead of "
+                         "requiring a pre-calibrated _cal input")
     ap.add_argument("--json", type=str, default="",
                     help="also write the table as JSON (blend score + one row per model)")
     args = ap.parse_args()
@@ -61,7 +97,8 @@ def main():
     lb = blend_lp(uid)
     eb = lb - ly
     blend_rmsle = float(np.sqrt(np.mean(eb ** 2)))
-    out["blend"] = {"rmsle": blend_rmsle, "n": int(len(y)), "weights": BLEND}
+    out["blend"] = {"rmsle": blend_rmsle, "n": int(len(y)), "source": BLEND_SOURCE,
+                    "weights": BLEND if BLEND_SOURCE == "hardcoded" else None}
     print(f"blend val_rmsle={blend_rmsle:.6f}  n={len(y)}", flush=True)
 
     targets = [(n, PREDS_DIR / f"{n}_val.parquet") for n in args.names]
@@ -71,8 +108,23 @@ def main():
             print(f"{name}: MISSING {path}")
             continue
         lp = load_lp(path, uid)
+        if args.calibrate:
+            from margin import calibrate_honest
+            lp = calibrate_honest(lp, ly, 24, 0)
+        elif not name.endswith("_cal"):
+            # Rule 1 of the team protocol: models may only be compared AFTER calibration -
+            # the raw ordering misled us eight times. This tool does not calibrate, so a raw
+            # name silently produces the wrong number: kostya46 reads 1.7024 raw against
+            # 1.6699 calibrated, and its margin +0.00083 against +0.00133. Warn, do not guess.
+            print(f"  ВНИМАНИЕ: {name} не похож на калиброванный (_cal). Числа ниже — по сырым "
+                  f"предсказаниям, сравнивать их с калиброванными НЕЛЬЗЯ. "
+                  f"Либо calibrate.py, либо флаг --calibrate.", flush=True)
         e = lp - ly
-        c = float(np.corrcoef(e, eb)[0, 1])
+        sm = float(np.sqrt(np.mean(e ** 2)))
+        # UNcentered correlation: the identity margin = sb/sm - c holds for E[e*eb]/(sm*sb).
+        # np.corrcoef centres both errors, which distorted 6 of 30 models - every one with a
+        # non-zero mean error, i.e. every uncalibrated model (Zhenya, zhenya_report.md).
+        c = float(np.mean(e * eb) / max(sm * blend_rmsle, 1e-12))
         # optimal 2-way weight in log space: minimise ||(1-w) eb + w e||
         d = e - eb
         w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))
@@ -80,7 +132,6 @@ def main():
         # Корреляция ошибок сама по себе НИЧЕГО не значит: для любой модели внутри
         # линейной оболочки бленда она тождественно равна sb/sm (остаток бленда
         # ортогонален оболочке). Работает только ЗАПАС — доля модели вне оболочки.
-        sm = float(np.sqrt(np.mean(e ** 2)))
         margin = blend_rmsle / max(sm, 1e-12) - c
         out["models"][name] = {"val_rmsle": rmsle(y, np.expm1(lp)), "err_corr": c,
                                "corr_expected": blend_rmsle / max(sm, 1e-12),

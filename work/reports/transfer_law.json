@@ -1,0 +1,101 @@
+{
+ "points": [
+  {
+   "name": "blend_delta",
+   "cls": "состав бленда",
+   "kappa": 0.618,
+   "sigma": 0.02,
+   "val_gain": 0.000655,
+   "conc_top1": null,
+   "conc_top01": null,
+   "n_eff": null,
+   "novelty": null,
+   "src": "r6_joint_opt.json b_opt[0]; вал night_blend_stability.json s_old->s_new",
+   "conc_ipr": null
+  },
+  {
+   "name": "ridge_v1",
+   "cls": "стек по признакам",
+   "kappa": 0.308,
+   "sigma": 0.016,
+   "val_gain": 0.000509,
+   "conc_top1": 4.2386,
+   "conc_top01": 0.8764,
+   "n_eff": null,
+   "novelty": null,
+   "src": "r6_joint_opt.json b_opt[1]; night_corrector_variants.json variants.base",
+   "conc_ipr": null
+  },
+  {
+   "name": "shade",
+   "cls": "форма",
+   "kappa": 1.002,
+   "sigma": 0.695,
+   "val_gain": null,
+   "conc_top1": null,
+   "conc_top01": null,
+   "n_eff": null,
+   "novelty": null,
+   "src": "r6_joint_opt.json b_opt[2]; KNOWLEDGE «Залив 21.08» 1.32+-0.51 по двум замерам",
+   "conc_ipr": null
+  },
+  {
+   "name": "W1_e_new",
+   "cls": "форма",
+   "kappa": 0.089,
+   "sigma": 0.055,
+   "val_gain": null,
+   "conc_top1": null,
+   "conc_top01": null,
+   "n_eff": 8709.0,
+   "novelty": 0.902,
+   "src": "KNOWLEDGE «»; w1_silence_e.json n_eff/новизна",
+   "conc_ipr": 28.705936387644964
+  },
+  {
+   "name": "S1_segwall",
+   "cls": "форма",
+   "kappa": 0.046,
+   "sigma": 0.055,
+   "val_gain": null,
+   "conc_top1": null,
+   "conc_top01": null,
+   "n_eff": 121332.1,
+   "novelty": 0.6799,
+   "src": "KNOWLEDGE «Залив 21.08»; segwall_probe.json n_eff/novelty18",
+   "conc_ipr": 2.060460504680954
+  }
+ ],
+ "hypothesis1_refuted": true,
+ "rank_tests": {
+  "conc_ipr": {
+   "n": 3,
+   "rho": -0.5,
+   "ci95": [
+    -1.0,
+    1.0
+   ]
+  },
+  "val_gain": {
+   "n": 4,
+   "rho": 0.39999999999999997,
+   "ci95": [
+    -1.0,
+    1.0
+   ]
+  },
+  "novelty": null
+ },
+ "loo": {
+  "измеренные (sigma<=0.10)": {
+   "по классу": 0.2285,
+   "общее среднее": 0.2142,
+   "наивный 0.5": 0.3425
+  },
+  "все точки": {
+   "по классу": 0.4543,
+   "общее среднее": 0.3384,
+   "наивный 0.5": 0.4071
+  }
+ }
+}

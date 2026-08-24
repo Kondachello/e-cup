@@ -72,6 +72,10 @@ def main():
     print("bin shifts:", np.round(shifts, 3).tolist())
 
     dt = pl.read_parquet(PREDS_DIR / f"{args.pred}_test.parquet").sort("user_id")
+    # валидационная сторона сверялась с якорем, тестовая — нет; таблица сдвигов
+    # применяется поюзерно, поэтому чужой юниверс здесь дал бы тихо неверный файл
+    assert np.array_equal(dt["user_id"].to_numpy(), uid), \
+        f"{args.pred}_test.parquet: user_id не совпадает с валидационным юниверсом"
     lt = np.log1p(np.clip(dt["pred"].to_numpy(), 0, None))
     ltc = apply_shifts(lt, centers, shifts)
 

@@ -2,7 +2,9 @@
 
 Why this tier exists
 --------------------
-Measured identity: a model's contribution to the blend is ~7.1*delta^2, where delta is the
+Measured identity (the CONSTANT is dead - buried 20-21.08, use margin.py's exact algebra;
+the identity for delta itself still holds):
+a model's contribution to the blend is ~7.1*delta^2, where delta is the
 share of the model OUTSIDE the blend's linear hull, and the blend residual is NOT predictable
 from our 203 aggregate features. Only a representation that is not a function of that feature
 set can help. Screening found exactly one: the low-rank structure of the user x week matrix
@@ -116,9 +118,50 @@ def free_gb() -> float:
 
 
 # ------------------------------------------------------------------ anchor plan
-def anchor_plan() -> dict:
-    """The exact anchors the champion protocol touches, split by role."""
+def on_val_week_grid(a: date) -> bool:
+    """Стоит ли якорь на 7-дневной сетке валидационного якоря."""
+    return (VAL_ANCHOR - a).days % 7 == 0
+
+
+def anchor_plan(strict_grid: bool = True) -> dict:
+    """The exact anchors the champion protocol touches, split by role.
+
+    СЕТКА. Всё, что кормится из общей недельной матрицы (`weekly_dense(VAL_ANCHOR)` +
+    `joint_block(G, off)`), опирается на то, что каждый якорь отстоит от VAL на целое
+    число недель: тогда `off = (VAL - a).days // 7` даёт блок, чей самый свежий день
+    РАВЕН якорю. Раньше это было записано комментарием и ничем не проверялось.
+
+    ЭКСПОЗИЦИЯ СЕЙЧАС НУЛЕВАЯ, и это надо читать именно так. На каноническом наборе
+    train_anchors(14) остаток от деления на 7 везде 0 — off-grid якорей НЕТ, ни один
+    отгружаемый артефакт этим не задет. Три якоря с остатком 2 (2025-12-22, 2025-12-29,
+    2026-01-05) были экспериментом с цензурированными якорями от 20.08, эксперимент
+    закрыт как мёртвый, якоря убраны с диска 23.08. Это защита от повторения, а не
+    починка случившегося.
+
+    ЧТО БЫЛО БЫ, окажись такой якорь на диске в момент сборки. Для 2025-12-22
+    (понедельник, 23 дня до VAL) off = 3, а неделя 3 покрывает 18–24.12 — в признаки
+    якоря попали бы 23 и 24 декабря, ПОСЛЕ него и внутри его целевого окна. Масштаб
+    такого попадания, посчитанный по train.parquet: активность в этих двух днях есть
+    у 136 672 юзеров (54.7%) на 2.02 млн GMV. Это верхняя оценка того, что зашло бы в
+    один блок из 36 недель, а не измеренный ущерб.
+
+    ПОЧЕМУ ЭТО НЕ ЛОВИТСЯ ОБЫЧНОЙ СВЕРКОЙ. Off-grid якорь при cutoff = VAL−30 всегда
+    попадает в gap, а не в fit, поэтому val-скор к нему иммунен по построению. Но
+    тестовая сторона train_wklin пулит fit + gap + VAL, то есть gap уезжает ровно в ту
+    половину, которая идёт в сабмит. Сверка «val совпал до шестого знака» такой дефект
+    пропускает; ловит его только отпечаток набора якорей (provenance, anchors_on_disk).
+
+    Поэтому off-grid якоря из плана исключаются, громко и по имени. `strict_grid=False`
+    оставлен для диагностики — считать на нём что-либо для сдачи нельзя.
+    """
     avail = available_train_anchors()
+    if strict_grid:
+        off_grid = [a for a in avail if not on_val_week_grid(a)]
+        if off_grid:
+            log("ВНИМАНИЕ: якоря вне 7-дневной сетки VAL исключены из плана "
+                "(их недельный блок захватывал бы дни ПОСЛЕ якоря): "
+                + ", ".join(f"{a} (+{(VAL_ANCHOR - a).days % 7}д)" for a in off_grid))
+        avail = [a for a in avail if on_val_week_grid(a)]
     cutoff = VAL_ANCHOR - timedelta(days=GAP_DAYS)
     return {"fit": [a for a in avail if a <= cutoff][-N_TRAIN_ANCHORS:],
             "gap": [a for a in avail if cutoff < a < VAL_ANCHOR],

@@ -48,6 +48,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).parent))
 from common import rmsle  # noqa: E402
 from exp_lib import log_score, save_preds  # noqa: E402
+from model_io import save_lgb  # noqa: E402
 from build_features_short import (FEATS, JAN_ANCHOR, TEST_ANCHOR_, funnel_cols,  # noqa: E402
                                   jan_grid, test_grid)
 from short_family import (CONFIGS, ES_EVERY, build_eval, build_train, fit_lgb,  # noqa: E402
@@ -116,6 +117,10 @@ def main():
     imp = sorted(zip([FEATS[i] for i in keep], m.feature_importance("gain")),
                  key=lambda t: -t[1])[:12]
     log("top gain: " + ", ".join(f"{f}={g:.0f}" for f, g in imp))
+    # Воспроизводимость: последний трейнер пула, не сохранявший веса. Без них *_val.parquet
+    # не восстановить из чистого клона, и модель числится «прогноз-артефактом»
+    # (inference.py --stage check). Бустер весит килобайты.
+    save_lgb(args.name, m, tag="val")
     save_preds(args.name, "val", uid_v, pv)
     del X, Xes, Xv, m
     gc.collect()
@@ -147,6 +152,7 @@ def main():
     gc.collect()
     uid_t, Xt, _ = build_eval(TEST_ANCHOR_)
     pt = np.expm1(np.clip(predict_lgb(mf, Xt[:, keep]), 0, None))
+    save_lgb(args.name, mf, tag="test")   # те же веса, что делают отгружаемый прогноз
     save_preds(args.name, "test", uid_t, pt)
     log(f"test pred mean_log1p={np.log1p(pt).mean():.4f} share>1={(pt > 1).mean():.4f} "
         f"| val pred mean_log1p={np.log1p(pv).mean():.4f}")

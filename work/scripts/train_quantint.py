@@ -1,4 +1,4 @@
-"""Quantile-integration estimator (quantint): E[log1p(y)|x] via the quantile function.
+r"""Quantile-integration estimator (quantint): E[log1p(y)|x] via the quantile function.
 
 RMSLE is RMSE in log space, so the optimal prediction is E[Z|x] with Z = log1p(y).
 Every other model in the project estimates that expectation DIRECTLY (regression).

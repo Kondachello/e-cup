@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import os
 import argparse
 import sys
 from pathlib import Path
@@ -24,7 +25,10 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from subs import MEASURED, lp, novelty, span_matrix
 
-ROOT = Path("/Users/alexanderkondakov/ozon-cup")
+# Корень репозитория: OZON_ROOT, иначе поднимаемся от этого файла.
+# Захардкоженный путь одной машины делал скрипт неработающим у всех
+# остальных членов команды и на чистом клоне.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
 PREDS = ROOT / "work" / "preds"
 
 
@@ -70,6 +74,12 @@ def main():
         print(f"перенос остатка от {args.carry_from}: разброс {resid.std():.4f}, "
               f"усадка {args.carry_shrink}; после переноса среднее {new.mean():.4f} "
               f"разброс {new.std():.4f}")
+
+    if args.strength != 1.0:
+        full = new - ref
+        new = ref + args.strength * full
+        print(f"сила шага {args.strength}: направление к опоре ужато с разброса "
+              f"{full.std():.4f} до {(new - ref).std():.4f}")
 
     h = new - ref
     n = len(uid)

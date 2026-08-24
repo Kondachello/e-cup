@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Держит очередь живой: если queue_runner упал, поднимает заново.
 # Запуск: nohup work/scripts/keep_runner.sh > /dev/null 2>&1 & disown
-cd /Users/alexanderkondakov/ozon-cup
+# Корень: OZON_ROOT, иначе два уровня вверх от этого скрипта.
+cd "${OZON_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 while true; do
   if ! pgrep -f "queue_runner.py" > /dev/null; then
     # выходим, если очередь пуста и стоит флаг остановки

@@ -15,6 +15,7 @@ c/q. Выигрыш в MSE равен c^2/q. Но c оценивается по 
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -24,7 +25,10 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).parent))
 from subs import lp
 
-ROOT = Path("/Users/alexanderkondakov/ozon-cup")
+# Корень репозитория: OZON_ROOT, иначе поднимаемся от этого файла.
+# Захардкоженный путь одной машины делал скрипт неработающим у всех
+# остальных членов команды и на чистом клоне.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
 N_PUB = 50_000
 
 # цепочка применённых файлов: (имя, публичный скор). Между соседями — подобранные шаги.

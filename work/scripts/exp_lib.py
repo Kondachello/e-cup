@@ -10,7 +10,12 @@ Predictions are raw GMV scale (>=0), NOT log.
 """
 from __future__ import annotations
 
-import fcntl
+import os
+
+try:
+    import fcntl
+except ImportError:      # Windows: нет flock, трек 5 упирался в это
+    fcntl = None
 import sys
 from datetime import date
 from pathlib import Path
@@ -55,12 +60,41 @@ def save_preds(name: str, split: str, user_ids: np.ndarray, preds: np.ndarray):
     pl.DataFrame({"user_id": user_ids.astype(np.int64), "pred": preds}).write_parquet(
         PREDS_DIR / f"{name}_{split}.parquet"
     )
+    # Происхождение рядом с прогнозом: набор якорей, включённые тиры, версии библиотек,
+    # хеш train.parquet, коммит. Без этого артефакт не помнит, из чего собран, и вопрос
+    # «почему не воспроизводится» неразрешим (см. work/scripts/provenance.py).
+    # Стемпинг не имеет права уронить обучение, поэтому все ошибки глушатся внутри.
+    try:
+        from provenance import stamp
+        stamp(name, split, PREDS_DIR)
+    except Exception:
+        pass
+
+
+def note(**kv):
+    """Сообщить провенансу ЭФФЕКТИВНЫЕ параметры прогона (см. provenance.note).
+
+    Трейнеры зовут это, а не provenance напрямую: ошибка стемпинга не должна
+    ронять обучение, и глушится она в одном месте.
+    """
+    try:
+        from provenance import note as _n
+        _n(**kv)
+    except Exception:
+        pass
 
 
 def log_score(name: str, val_rmsle: float, notes: str = ""):
     path = REPORTS_DIR / "scores.tsv"
     with open(path, "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX)
         f.write(f"{name}\t{val_rmsle:.6f}\t{notes}\n")
-        fcntl.flock(f, fcntl.LOCK_UN)
+        # flush ДО снятия блокировки: f.write кладёт строку в буфер питона, а сброс на
+        # диск раньше происходил при выходе из with, то есть уже ПОСЛЕ LOCK_UN — и
+        # блокировка не защищала собственно запись.
+        f.flush()
+        os.fsync(f.fileno())
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_UN)
     print(f"[SCORE] {name}: {val_rmsle:.6f} ({notes})", flush=True)

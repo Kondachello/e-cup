@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -87,6 +88,29 @@ def user_universe() -> pl.DataFrame:
     )
 
 
+_TIER_WARNED: set[tuple[str, str]] = set()
+
+
+def _warn_missing_tier(tier: str, anchor: date, path: Path) -> None:
+    """Тир запрошен переменной окружения, а файла нет.
+
+    Раньше v2/v3/v4 в этом случае просто выключались — молча, без следа в выводе.
+    Именно так набор признаков становится 196 вместо 203, обученная на нём модель
+    выглядит нормальной, а воспроизвести её потом нельзя: конфигурация прогона нигде
+    не записана (см. work/scripts/provenance.py и разбор сверки wklin 23.08).
+    Тиры v5/v7/v8/v10 в тех же условиях доливают null и сохраняют схему; здесь так
+    нельзя — эти тиры несут содержательные колонки, — поэтому хотя бы кричим.
+    """
+    key = (tier, anchor.isoformat())
+    if key in _TIER_WARNED:
+        return
+    _TIER_WARNED.add(key)
+    print(f"[common] ВНИМАНИЕ: USE_{tier.upper()}=1, но файла тира нет — тир НЕ "
+          f"подключён: {path}. Набор признаков будет уже ожидаемого; "
+          f"собрать: build_features_{tier}.py --anchors {anchor.isoformat()}",
+          file=sys.stderr, flush=True)
+
+
 def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     import os
     p = FEATURES_DIR / f"anchor={anchor.isoformat()}.parquet"
@@ -103,6 +127,10 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     use3 = v3.exists() and os.environ.get("USE_V3")
     use4 = v4.exists() and os.environ.get("USE_V4")
     use6 = v6.exists() and os.environ.get("USE_V6")
+    for _tier, _req, _got, _path in (("v2", "USE_V2", use2, extra), ("v3", "USE_V3", use3, v3),
+                                     ("v4", "USE_V4", use4, v4), ("v6", "USE_V6", use6, v6)):
+        if os.environ.get(_req) and not _got:
+            _warn_missing_tier(_tier, anchor, _path)
     use7 = os.environ.get("USE_V7")
     use8 = os.environ.get("USE_V8")
     use10 = os.environ.get("USE_V10")
@@ -182,6 +210,9 @@ def add_capacity_control(df: pl.DataFrame, n: int) -> pl.DataFrame:
     """N columns of pure capacity: rotate percentile ranks of N existing features."""
     src = sorted(c for c in df.columns
                  if c not in ("user_id", "anchor_date", "target") and not c.startswith("v5cap_"))
+    # запрошено больше колонок-пустышек, чем есть источников: QR тогда вернёт Q формы
+    # (m, m), а цикл ниже пойдёт до n и упадёт по индексу — лучше сказать прямо
+    assert n <= len(src), f"USE_V5CAP={n} больше числа доступных признаков ({len(src)})"
     src = src[:n]
     R = np.linalg.qr(np.random.default_rng(20260819).normal(size=(len(src), n)))[0]
     A = np.empty((df.height, len(src)), dtype=np.float64)

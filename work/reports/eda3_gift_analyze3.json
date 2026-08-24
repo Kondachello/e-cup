@@ -1,0 +1,101 @@
+{
+ "rmse_blend": 1.665647,
+ "buyflag_geometric": {
+  "vrun|mrun (gift)": [
+   0.0632,
+   42342,
+   46928
+  ],
+  "june replica": [
+   0.0364,
+   50464,
+   51149
+  ],
+  "sept replica": [
+   0.0378,
+   56980,
+   59879
+  ]
+ },
+ "catlift_geometric": {
+  "vrun|mrun (gift)": [
+   0.0204,
+   184096
+  ],
+  "june replica": [
+   0.0134,
+   197902
+  ],
+  "sept replica": [
+   0.0218,
+   214353
+  ]
+ },
+ "Yp_struct_single_corr_e": {
+  "lp_Yp_gmv": {
+   "cov": 1.0,
+   "corr_e": 0.00919
+  },
+  "lp_Xp_gmv": {
+   "cov": 1.0,
+   "corr_e": 0.00829
+  },
+  "lp_Yp_ord": {
+   "cov": 1.0,
+   "corr_e": 0.00922
+  },
+  "Yp_dord": {
+   "cov": 1.0,
+   "corr_e": 0.00872
+  },
+  "lp_Yp_cat": {
+   "cov": 1.0,
+   "corr_e": 0.00035
+  },
+  "lp_Yp_search": {
+   "cov": 1.0,
+   "corr_e": 0.00039
+  },
+  "aov_Yp": {
+   "cov": 0.319,
+   "corr_e": 0.00446
+  },
+  "aov_Yp_lift": {
+   "cov": 0.203,
+   "corr_e": -0.00263
+  },
+  "csh_Yp": {
+   "cov": 0.319,
+   "corr_e": 0.00726
+  },
+  "csh_Yp_lift": {
+   "cov": 0.203,
+   "corr_e": 0.00256
+  }
+ },
+ "Yp_struct_oof_corrector": {
+  "oof_rmse_delta": -7.97e-05,
+  "total_gain_mse": 0.0002656,
+  "top1pct_share": -5.113,
+  "top01pct_share": -1.19
+ },
+ "M2_decomp": {
+  "base_rich": 1.66835,
+  "+ya_gmv_level": 1.668298,
+  "+ya_ord": 1.667295,
+  "+ya_counts": 1.667169,
+  "+ya_aov_csh": 1.666635,
+  "aov_csh_only": 1.667621,
+  "counts_only": 1.668233,
+  "ord_only": 1.667965
+ },
+ "M2_decomp_deltas": {
+  "ya_gmv_level": -5.2e-05,
+  "ord_extra": -0.001003,
+  "counts_extra": -0.000126,
+  "aov_csh_extra": -0.000533,
+  "aov_csh_alone": -0.000729,
+  "counts_alone": -0.000117,
+  "ord_alone": -0.000385
+ }
+}

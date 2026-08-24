@@ -15,8 +15,9 @@ A. Does the weekly representation help the CHAMPION BOOSTER as one more feature 
 B. Does the linear model contribute to the BLEND? That is the real question, and it is not
    answered by the model's own score (febspec scored 1.83 solo and still contributed). The
    measurement is err_corr's MARGIN = sb/sm - rho, the share of the model outside the blend's
-   linear hull, with contribution ~= 7.1 * margin^2. Acceptance: contribution > 0.0003,
-   which needs margin > 0.0065; the project record is 0.00193 (febspec2_cal).
+   linear hull. NB: this script still reports the buried shorthand 7.1 * margin^2 as
+   "gain_from_margin" - read "gain" instead, which is measured directly. The exact pair
+   algebra and the current record (0.00307, lagd28) live in margin.py.
 
 Output: work/reports/v5_verdict.json
 Run: POLARS_MAX_THREADS=3 .venv/bin/python work/scripts/v5_verdict.py
@@ -43,7 +44,12 @@ BOOST_ARMS = ["twl_v5", "twl_v5s", "twl_v5cap", "twl_v5ctl"]
 LINEAR = ["wklin", "wklin_wk", "wklin_base"]
 KFOLD, BINS, SEED = 5, 24, 0
 RECORD_MARGIN = 0.00193          # febspec2_cal, the project record
-CONTRIB_K = 7.1                  # contribution ~= CONTRIB_K * margin^2
+# УСТАРЕЛО (похоронено 20-21.08): правило "вклад = 7.1*запас^2" объясняло 9% разброса и
+# занижало сильные модели в 15-20 раз. Значение НЕ меняем, иначе записанный
+# work/reports/v5_verdict.json перестанет соответствовать коду, которым получен; направление
+# v5 закрыто. Поле "gain_from_margin" в выводе читать нельзя - смотреть "gain", он меряется
+# напрямую. Для новых замеров: margin.py (одна модель) и joint_gain.py (набор).
+CONTRIB_K = 7.1                  # DEPRECATED: contribution ~= CONTRIB_K * margin^2
 THRESHOLD = 0.0003
 
 
@@ -111,7 +117,10 @@ def main():
                 continue
             e = lp - ly
             sm = float(np.sqrt(np.mean(e ** 2)))
-            rho = float(np.corrcoef(e, eb)[0, 1])
+            # НЕцентрированная: тождество ЗАПАС = sb/sm - rho выполняется для
+            # E[e*eb]/(sm*sb). На калиброванных входах числа те же, но пусть все
+            # реализации запаса в проекте считают одинаково.
+            rho = float(np.mean(e * eb) / max(sm * sb, 1e-12))
             margin = sb / max(sm, 1e-12) - rho
             d = e - eb
             w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))

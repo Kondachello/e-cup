@@ -1,0 +1,66 @@
+{
+ "YoY_matched_weeks": {
+  "GIFT 07-13.02 (25->26)": {
+   "buyers_y1": 42342,
+   "buyers_y2": 66320,
+   "buyflag_raw": 0.2265,
+   "buyflag_partial_mid": [
+    0.0165,
+    250000
+   ],
+   "aov_partial_mid": [
+    0.0747,
+    20610
+   ],
+   "catshare_partial_mid": [
+    0.0745,
+    20610
+   ],
+   "catcnt_partial_mid": [
+    0.1212,
+    250000
+   ],
+   "buyflag_partial_mid+prev14": [
+    0.0157,
+    250000
+   ],
+   "aov_partial_mid+prev14": [
+    0.0704,
+    20610
+   ]
+  },
+  "NEUTRAL 08-14.01 (25->26)": {
+   "buyers_y1": 39910,
+   "buyers_y2": 63923,
+   "buyflag_raw": 0.2228,
+   "buyflag_partial_mid": [
+    0.0155,
+    250000
+   ],
+   "aov_partial_mid": [
+    0.0734,
+    19105
+   ],
+   "catshare_partial_mid": [
+    0.0722,
+    19105
+   ],
+   "catcnt_partial_mid": [
+    0.1146,
+    250000
+   ]
+  }
+ },
+ "gift_week_2026_auc": {
+  "rate": 0.2653,
+  "auc_level_only": 0.8108,
+  "auc_level+gift_history_2025": 0.8109,
+  "delta": 0.0001
+ },
+ "neutral_week_2026_auc": {
+  "rate": 0.2557,
+  "auc_level_only": 0.7983,
+  "auc_level+same_week_history_2025": 0.7985,
+  "delta": 0.0002
+ }
+}

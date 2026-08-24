@@ -1,0 +1,70 @@
+{
+ "design": "терцили std недельной активности (12 нед до якоря) внутри квинтилей уровня",
+ "n_volatile": 84563,
+ "n_stable": 85737,
+ "models": [
+  {
+   "model": "seq2tr_f",
+   "cls": "seq",
+   "score": 1.681549,
+   "margin_volatile": -0.000366,
+   "margin_stable": 5.4e-05,
+   "delta": -0.00042
+  },
+  {
+   "model": "gseq_small_s42",
+   "cls": "seq",
+   "score": 1.698178,
+   "margin_volatile": 0.002367,
+   "margin_stable": 0.002079,
+   "delta": 0.000289
+  },
+  {
+   "model": "gseq_big_s42",
+   "cls": "seq",
+   "score": 1.677202,
+   "margin_volatile": 0.000831,
+   "margin_stable": 0.00032,
+   "delta": 0.000511
+  },
+  {
+   "model": "c_ts2_s42",
+   "cls": "boost",
+   "score": 1.668504,
+   "margin_volatile": 7e-06,
+   "margin_stable": -2.2e-05,
+   "delta": 2.9e-05
+  },
+  {
+   "model": "c_xtw_s42",
+   "cls": "boost",
+   "score": 1.672076,
+   "margin_volatile": 0.000381,
+   "margin_stable": 0.000353,
+   "delta": 2.8e-05
+  },
+  {
+   "model": "twl_v7",
+   "cls": "boost",
+   "score": 1.669795,
+   "margin_volatile": -9e-06,
+   "margin_stable": 0.000185,
+   "delta": -0.000195
+  },
+  {
+   "model": "c_dirlgb_s42",
+   "cls": "boost",
+   "score": 1.670251,
+   "margin_volatile": -0.000558,
+   "margin_stable": -0.000623,
+   "delta": 6.5e-05
+  }
+ ],
+ "delta_seq": 0.000126,
+ "delta_boost": -1.8e-05,
+ "diff_in_diff": 0.000145,
+ "bootstrap_95": [
+  -0.000822,
+  0.001193
+ ]
+}

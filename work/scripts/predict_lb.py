@@ -64,6 +64,27 @@ MEASURED: list[tuple[str, str, float]] = [
     ("G1_probe_zeropush", "G1_probe_zeropush.csv",          1.6507738649),
     ("H1_applied",        "H1_applied.csv",                 1.6489955175417363),
     ("H2_edge_p1",        "H2_edge_p1.csv",                 1.6490330321),
+    
+    ("Q1_probes5",       "Q1_probes5.csv",                 1.6476964103667104),
+    ("R2_newblend",      "R2_newblend.csv",                1.6475563338299228),
+    ("R3_ridge",         "R3_ridge.csv",                   1.6478842656567172),
+    ("R5_shade",         "R5_shade.csv",                   1.6475208699),
+    ("S1_segwall",       "S1_segwall.csv",                 1.6478780790944672),
+    ("V1_tfm3b_pre",     "V1_tfm3b_pre.csv",               1.647284324),
+    ("V2_tfm3b_opt",     "V2_tfm3b_opt.csv",               1.6472259177),
+    ("V3_canon",         "V3_canon.csv",                   1.6472249545),
+    # паблик-арбитраж (подгонка под 50k, НЕ финалисты, на приват не переносятся)
+    ("SHOW_maxpub",      "SHOW_maxpub.csv",                1.6463720678),
+    ("SHOW2_aggr",       "SHOW2_aggr.csv",                 1.6463725981),
+    # --- залив 24.08, пять файлов. Скоры с платформы, перенесены Сашей.
+    # SHOW3* — паблик-подгонки: в спане они нужны (предсказатель считает по всему
+    # замеренному), но финалистами быть НЕ МОГУТ, это ловит finalist_guard.py.
+    ("SHOW3_maxpub",     "SHOW3_maxpub.csv",               1.6464294119876133),
+    ("SHOW3b_safe",      "SHOW3b_safe.csv",                1.6464157246645075),
+    ("G1_gru_tfm_full",  "G1_gru_tfm_full.csv",            1.6472880883414374),
+    ("F1_trio_full",     "F1_trio_full.csv",               1.6477773117825400),
+    ("G2_gru_tfm_02",    "G2_gru_tfm_02.csv",              1.6471581395000000),
+
 ]
 
 
