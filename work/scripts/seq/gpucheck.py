@@ -40,6 +40,7 @@ def main():
     ap.add_argument('--load-tensor', default='',
                     help='сначала загрузить настоящий тензор (как в обучении), потом мерить')
     ap.add_argument('--pin', action='store_true', help='закреплять тензор (по умолчанию нет)')
+    ap.add_argument('--mmap', action='store_true', help='тензор через memmap, без копии в RAM')
     a = ap.parse_args()
 
     print('=' * 66)
@@ -69,10 +70,10 @@ def main():
     if a.load_tensor:
         print('\n0. загружаю настоящий тензор — как в обучении')
         from train_tcn import Store
-        st = Store(a.load_tensor, pin=a.pin, cohort3=True)
+        st = Store(a.load_tensor, pin=a.pin, cohort3=True, mmap=a.mmap)
         st.to_device('cuda')
         a.n_in = st.n_in
-        print(f'  тензор в памяти, закрепление={a.pin}, каналов на входе {st.n_in}')
+        print(f'  тензор готов: memmap={a.mmap}, закрепление={a.pin and not a.mmap}, каналов на входе {st.n_in}')
         try:
             import psutil
             vm = psutil.virtual_memory()

@@ -25,7 +25,7 @@ MIN_TR_ANCHOR= 200      # переопределяется флагом --min-an
 
 # ---------------------------------------------------------------- данные
 class Store:
-    def __init__(self, path, pin=True, abs_time=False, cohort3=True):
+    def __init__(self, path, pin=True, abs_time=False, cohort3=True, mmap=False):
         m = np.load(f'{path}/meta.npz')
         self.n_u, self.n_d, self.n_ch = int(m['n_users']), int(m['n_days']), int(m['n_ch'])
         self.uids  = m['user_ids']
@@ -43,10 +43,24 @@ class Store:
         seq = np.memmap(f'{path}/seq.f16', np.float16, 'r', shape=(self.n_u,self.n_d,self.n_ch))
         gmv = np.memmap(f'{path}/gmv.f32', np.float32, 'r', shape=(self.n_u,self.n_d))
         orr = np.memmap(f'{path}/ord.f16', np.float16, 'r', shape=(self.n_u,self.n_d))
-        print('загружаю тензор в RAM...', flush=True)
-        self.seq = torch.from_numpy(np.array(seq))     # ~2 ГБ в RAM
-        self.gmv = torch.from_numpy(np.array(gmv))
-        self.ord = torch.from_numpy(np.array(orr))
+        if mmap:
+            # Не копируем в RAM: страницы подтягиваются по мере обращения и живут
+            # в кэше страниц, который система может вытеснить. Обычная копия —
+            # анонимная память, вытеснить её нельзя, и под Windows она отнимает
+            # у драйвера то, чем он подпирает выделения видеопамяти.
+            import warnings as _w
+            print('тензор через memmap (в RAM не копирую)', flush=True)
+            with _w.catch_warnings():
+                _w.simplefilter('ignore')      # memmap открыт только на чтение
+                self.seq = torch.from_numpy(seq)
+                self.gmv = torch.from_numpy(gmv)
+                self.ord = torch.from_numpy(orr)
+            pin = False
+        else:
+            print('загружаю тензор в RAM...', flush=True)
+            self.seq = torch.from_numpy(np.array(seq))     # ~2 ГБ в RAM
+            self.gmv = torch.from_numpy(np.array(gmv))
+            self.ord = torch.from_numpy(np.array(orr))
         self.cal = cal if abs_time else cal[:, :-1]   # последний столбец — days/n_days
         if pin:
             for t in ('seq','gmv','ord'):

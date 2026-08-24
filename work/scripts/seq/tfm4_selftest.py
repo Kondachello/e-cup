@@ -231,6 +231,18 @@ def run() -> int:
         tb2 = tp2.to_dev(tp2.gather(torch.arange(8), torch.full((8,), tfm4.day_index(dates[-1]))), 'cpu')
         check(tuple(tb2.shape) == (8, tp2.n_tab), 'выборка после отсева нужной ширины')
 
+        print('\n7c1. режим memmap даёт те же батчи, что копия в RAM')
+        from train_tcn import Store as _Store
+        _a = _Store(str(tmp / 'tensor'), pin=False, cohort3=True)
+        _b = _Store(str(tmp / 'tensor'), pin=False, cohort3=True, mmap=True)
+        _u = torch.arange(48); _an = torch.full((48,), 300)
+        _ba, _bb = _a.cpu_batch(_u, _an), _b.cpu_batch(_u, _an)
+        check(all(torch.equal(_ba[k], _bb[k]) for k in ('x', 'pad', 'idx', 'g', 'o')),
+              'батчи из memmap побитово равны батчам из RAM')
+        check(torch.allclose(_a.mu, _b.mu) and torch.allclose(_a.sd, _b.sd),
+              'нормировочные статистики совпадают')
+        del _a, _b
+
         print('\n7c2. каждый a.<флаг> в tfm4.py существует в разборщике аргументов')
         # Ловит целый класс: обращение к флагу, которого нет. На CPU такие строки
         # часто не выполняются (спрятаны за `dev == "cuda"`), и опечатка всплывает
