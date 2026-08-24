@@ -93,7 +93,7 @@ import polars as pl  # noqa: E402
 sys.path.insert(0, str(Path(__file__).parent))
 from common import (  # noqa: E402
     FEATURES_DIR, REPORTS_DIR, TEST_ANCHOR, TRAIN_PARQUET, VAL_ANCHOR,
-    V5_MAX_COMPS, v5_cols, user_universe,
+    V5_MAX_COMPS, train_anchors, v5_cols, user_universe,
 )
 from exp_lib import available_train_anchors  # noqa: E402
 
@@ -123,8 +123,36 @@ def on_val_week_grid(a: date) -> bool:
     return (VAL_ANCHOR - a).days % 7 == 0
 
 
-def anchor_plan(strict_grid: bool = True) -> dict:
+def anchor_plan(strict_grid: bool = True, source: str = "protocol") -> dict:
     """The exact anchors the champion protocol touches, split by role.
+
+    ИСТОЧНИК НАБОРА — ПРОТОКОЛ, А НЕ СОДЕРЖИМОЕ КАТАЛОГА (изменено 24.08).
+
+    Было: fit = `[a for a in available_train_anchors() if a <= cutoff][-14:]`, то есть
+    ПОСЛЕДНИЕ 14 файлов с диска. У этого правила скверное свойство: добавление якоря не
+    добавляет данных, а ВЫТЕСНЯЕТ старый новым и сжимает окно обучения. Замерено на
+    ветке `_wk` (она считается только по недельным колонкам train.parquet, поэтому её
+    можно пересчитать для любого набора без сборки признаков):
+
+        каталог шага 14 (build_features --preset all)  fit 12, 2025-07-02..12-03, 154 дня
+                                                        -> _wk 1.736788, alpha 3162.28
+        каталог шага  7 (~31 файл, машина №1)          fit 14, 2025-09-10..12-10,  91 день
+                                                        -> _wk 1.731511, alpha 10000
+
+    Второе — ровно записанное значение канонического wklin_wk, совпадение до 1e-7 на
+    переборе 60 наборов; контроль той же реплики воспроизводит сегодняшний прогон
+    (1.736788) до 2e-7. То есть вся история «wklin не воспроизводится» объясняется
+    плотностью каталога, а восемь отвергнутых гипотез её не проверяли, потому что все
+    меняли количество якорей ОДНОЙ сетки.
+
+    Теперь набор задаётся протоколом: `train_anchors(N_TRAIN_ANCHORS)` — та же сетка,
+    что строит `build_features.py --preset all`, — и делится по cutoff. Результат не
+    зависит от того, что ещё лежит в каталоге. Недостающие файлы называются по имени,
+    а не подменяются молча ближайшими.
+
+    `source="disk"` возвращает историческое поведение: нужно, чтобы воспроизвести
+    артефакты, собранные до 24.08 (в том числе отгружаемый wklin, вес 0.071). Считать
+    на нём что-то новое не надо.
 
     СЕТКА. Всё, что кормится из общей недельной матрицы (`weekly_dense(VAL_ANCHOR)` +
     `joint_block(G, off)`), опирается на то, что каждый якорь отстоит от VAL на целое
@@ -155,6 +183,22 @@ def anchor_plan(strict_grid: bool = True) -> dict:
     оставлен для диагностики — считать на нём что-либо для сдачи нельзя.
     """
     avail = available_train_anchors()
+    if source == "protocol":
+        grid = train_anchors(N_TRAIN_ANCHORS)
+        missing = [a for a in grid if a not in set(avail)]
+        if missing:
+            raise FileNotFoundError(
+                "нет файлов признаков для якорей протокола: "
+                + ", ".join(a.isoformat() for a in missing)
+                + f"\n  собрать: build_features.py --anchors "
+                + ",".join(a.isoformat() for a in missing))
+        avail = grid
+    elif source == "disk":
+        log("ВНИМАНИЕ: source='disk' — набор берётся как ПОСЛЕДНИЕ "
+            f"{N_TRAIN_ANCHORS} файлов каталога и зависит от того, что в нём лежит. "
+            "Режим оставлен только для воспроизведения артефактов до 24.08.")
+    else:
+        raise ValueError(f"source должен быть 'protocol' или 'disk', не {source!r}")
     if strict_grid:
         off_grid = [a for a in avail if not on_val_week_grid(a)]
         if off_grid:
