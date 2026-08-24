@@ -37,6 +37,9 @@ def main():
     ap.add_argument('--heads', type=int, default=4)
     ap.add_argument('--n-in', type=int, default=17)
     ap.add_argument('--n-tab', type=int, default=176)
+    ap.add_argument('--load-tensor', default='',
+                    help='сначала загрузить настоящий тензор (как в обучении), потом мерить')
+    ap.add_argument('--pin', action='store_true', help='закреплять тензор (по умолчанию нет)')
     a = ap.parse_args()
 
     print('=' * 66)
@@ -63,6 +66,21 @@ def main():
         print('память хоста   : psutil не установлен (pip install psutil)')
     print('=' * 66)
 
+    if a.load_tensor:
+        print('\n0. загружаю настоящий тензор — как в обучении')
+        from train_tcn import Store
+        st = Store(a.load_tensor, pin=a.pin, cohort3=True)
+        st.to_device('cuda')
+        a.n_in = st.n_in
+        print(f'  тензор в памяти, закрепление={a.pin}, каналов на входе {st.n_in}')
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            print(f'  память хоста теперь: свободно {gb(vm.available):.1f} ГБ')
+        except ImportError:
+            pass
+        print(f'  память карты теперь: свободно {gb(free_now()):.2f} ГБ')
+
     print('\n1. просто выделить память кусками по 256 МБ')
     held, n = [], 0
     try:
@@ -78,7 +96,7 @@ def main():
     print('\n2. прямой и обратный проход настоящей модели на случайных данных')
     W = {'y30': 1.0, 'y7': .25, 'y14': .25, 'ord30': .25, 'act30': .25, 'buy': .25}
     for B in a.batch:
-        torch.cuda.empty_cache()
+        torch.cuda.empty_cache(); torch.cuda.reset_peak_memory_stats()
         f0 = free_now()
         try:
             base = Transformer(a.n_in, a.channels, a.layers, 0.0, a.heads)
@@ -106,7 +124,7 @@ def main():
         finally:
             for v in ('m', 'base', 'opt', 'scaler', 'x', 'tb', 'y', 'p', 'loss'):
                 locals().pop(v, None)
-            torch.cuda.reset_peak_memory_stats(); torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
     print('\nЕсли крупные батчи отказывают, а мелкие проходят — это предел процесса,')
     print('а не карты: под Windows система выдаёт процессу бюджет видеопамяти, и он')
     print('меньше свободного объёма. Тогда рабочий путь — меньший батч.')

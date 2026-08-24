@@ -430,6 +430,10 @@ def main(a):
         pass
     st = Store(a.data, pin=(not a.no_pin and dev == 'cuda'),
                abs_time=a.abs_time, cohort3=not a.cohort1)
+    if a.no_pin:
+        # Store закрепляет ещё и каждый батч отдельно (do_pin), от флага pin это
+        # не зависит. Раз просили не закреплять — не закрепляем ничего.
+        st.do_pin = False
     st.to_device(dev)
 
     tab = None
