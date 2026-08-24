@@ -19,7 +19,7 @@ tfm3b учился на всех днях подряд: без прогона н
 """
 from __future__ import annotations
 
-import argparse, json, os, subprocess, sys
+import argparse, glob, json, os, shutil, subprocess, sys
 from pathlib import Path
 
 for _s in (sys.stdout, sys.stderr):
@@ -81,7 +81,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stage", required=True,
-                    choices=["prep", "check", "probe", "seeds", "phaseB", "report"])
+                    choices=["prep", "check", "probe", "seeds", "phaseB", "report", "collect"])
     ap.add_argument("--root", default=".")
     ap.add_argument("--data", default="tensor")
     ap.add_argument("--tab-npz", default="")
@@ -119,6 +119,31 @@ def main() -> int:
             return 0
         return run(tfm4 + ["--prep-tab", "--tab-npz", a.tab_npz, "--tab-cache", a.tab_cache],
                    logs / "tfm4_prep.log")
+
+    if a.stage == "collect":
+        # Всё, что нужно для замера запаса, в одну папку. Существует ровно
+        # потому, что перечислять эти файлы руками каждый раз — гарантированно
+        # что-нибудь забыть.
+        dst = root / "_to_kosta" / ("tfm4_" + "_".join(f"s{s_}" for s_ in a.seeds))
+        dst.mkdir(parents=True, exist_ok=True)
+        pats = []
+        for sd in a.seeds:
+            pats += [f"work/preds/tfm4*s{sd}*.parquet", f"result_tfm4*s{sd}*.json",
+                     f"history_tfm4*s{sd}*.csv", f"val_*tfm4*s{sd}*.npy",
+                     f"sub_tfm4*s{sd}*.csv"]
+        n = 0
+        for pat in pats:
+            for f in sorted(glob.glob(str(root / pat))):
+                shutil.copy2(f, dst / Path(f).name); n += 1
+                print(f"  + {Path(f).name}", flush=True)
+        if not n:
+            print("ничего не нашлось — сиды те? прогоны прошли?", flush=True); return 1
+        zp = dst.with_suffix(".zip")
+        if zp.exists(): zp.unlink()
+        shutil.make_archive(str(dst), "zip", str(dst))
+        print(f"\nсобрано {n} файлов -> {dst}\nархив {zp} ({zp.stat().st_size/2**20:.1f} МБ)",
+              flush=True)
+        return 0
 
     if a.stage == "report":
         rows = []
