@@ -29,6 +29,36 @@ FEATS = ["btyd_p_alive", "btyd_exp_purch30", "btyd_exp_monetary", "btyd_exp_ltv3
          "btyd_freq", "btyd_recency", "btyd_T"]
 
 
+
+def _fit_retry(fitter, what, *args, tries=4, **kw):
+    """Подгонка с повтором ТОЛЬКО при отказе сходимости.
+
+    Замерено 24.08: подгонка недетерминирована в том, СХОДИТСЯ ли она (на одном якоре
+    lifetimes.ConvergenceError, повтор на тех же данных прошёл), но полностью
+    детерминирована в том, ЧТО выдаёт: пересборка v4 на двух якорях дала значения,
+    совпадающие побитово (максимальное относительное расхождение 0.0e+00 по всем семи
+    колонкам). Значит доверять значениям можно, чинить надо только срыв.
+
+    ПЕРВАЯ попытка идёт БЕЗ изменений — иначе сдвинулись бы значения у всех моделей на
+    тире v4. Стартовая точка меняется только со второй, когда штатная уже провалилась;
+    молча отдать неполный тир нельзя — раньше это давало 196 признаков вместо 203.
+    """
+    last = None
+    for i in range(tries):
+        try:
+            if i:
+                kw = dict(kw, initial_params=np.array([1.0, 1.0, 1.0, 1.0]) * (1.0 + 0.5 * i))
+            fitter.fit(*args, **kw)
+            if i:
+                print(f"    {what}: сошлась с {i + 1}-й попытки", flush=True)
+            return fitter
+        except Exception as e:               # ConvergenceError и всё, что из него растёт
+            last = e
+            kw.pop("initial_params", None)
+    raise RuntimeError(
+        f"{what}: не сошлась за {tries} попыток ({last}). Тир v4 для этого якоря НЕ "
+        f"построен — не игнорировать: без него моделям достаётся 196 признаков вместо 203.")
+
 def rfm_table(anchor: date, lf: pl.LazyFrame) -> pl.DataFrame:
     """One row per user with >=1 order-day up to anchor."""
     return (
@@ -60,13 +90,13 @@ def build(anchor: date, uni: pl.DataFrame, lf: pl.LazyFrame) -> None:
     rep = r.filter(pl.col("frequency") > 0)
     # compress identical (f, r, T) integer triples into weights for a fast fit
     g = rep.group_by(["frequency", "recency", "mdl_larvik"]).len()
-    bgf = BetaGeoFitter(penalizer_coef=PEN)
-    bgf.fit(g["frequency"].to_numpy(), g["recency"].to_numpy(), g["mdl_larvik"].to_numpy(),
-            weights=g["len"].to_numpy())
+    bgf = _fit_retry(BetaGeoFitter(penalizer_coef=PEN), "BG/NBD",
+                     g["frequency"].to_numpy(), g["recency"].to_numpy(), g["mdl_larvik"].to_numpy(),
+                     weights=g["len"].to_numpy())
 
     gg = rep.filter(pl.col("monetary") > 0)
-    ggf = GammaGammaFitter(penalizer_coef=PEN)
-    ggf.fit(gg["frequency"].to_numpy(), gg["monetary"].to_numpy())
+    ggf = _fit_retry(GammaGammaFitter(penalizer_coef=PEN), "Gamma-Gamma",
+                     gg["frequency"].to_numpy(), gg["monetary"].to_numpy())
 
     f = r["frequency"].to_numpy()
     rec = r["recency"].to_numpy()
