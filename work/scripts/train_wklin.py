@@ -151,11 +151,17 @@ def main():
     ap.add_argument("--emit-tier", action="store_true")
     ap.add_argument("--n-anchors", type=int, default=0, help="mechanics check: fewer fit anchors")
     ap.add_argument("--no-test", action="store_true")
+    ap.add_argument("--anchor-source", choices=("protocol", "disk"), default="protocol",
+                    help="откуда берётся набор якорей. protocol (умолчание) — из "
+                         "train_anchors(N), не зависит от содержимого каталога. disk — "
+                         "прежнее поведение «последние 14 файлов каталога»; нужно ровно "
+                         "для воспроизведения артефактов до 24.08 (отгружаемый wklin "
+                         "собран на каталоге шага 7, набор 2025-09-10..2025-12-10)")
     ap.add_argument("--notes", default="")
     args = ap.parse_args()
 
     t0 = time.time()
-    plan = anchor_plan()
+    plan = anchor_plan(source=args.anchor_source)
     fit_a, gap_a = plan["fit"], plan["gap"]
     if args.n_anchors:
         fit_a = fit_a[-args.n_anchors:]
