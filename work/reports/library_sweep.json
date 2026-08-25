@@ -1,0 +1,79 @@
+{
+ "seed": 0,
+ "reference_blend": 1.665647,
+ "n_candidates": 27,
+ "candidates": [
+  "behavonly_avg_cal",
+  "c_ts2_avg_cal",
+  "c_ts2_s42_cal",
+  "channel2_cal",
+  "febspec2_cal",
+  "febspec_cal",
+  "fusion_f_cal",
+  "fusion_v3_avg_cal",
+  "fusion_v3c_avg_cal",
+  "fusion_v3ctl_cal",
+  "gseq_big_s42_cal",
+  "gseq_big_s42",
+  "gseq_small_s42_cal",
+  "gseq_small_s42",
+  "kostya46_cal",
+  "kostya46",
+  "lagd28",
+  "mlpbin_cal",
+  "mlpziln_cal",
+  "short14_cal",
+  "tfm4_cal",
+  "tfm4_tabless_cal",
+  "weak_an_d_cal",
+  "weak_ft_recency_cal",
+  "wklin_base_cal",
+  "wklin",
+  "wklin_wk_cal"
+ ],
+ "excluded": {},
+ "curve": [
+  {
+   "k": 1,
+   "added": "tfm4_tabless_cal",
+   "dev": 0.000481,
+   "eval": 0.000397,
+   "floor_mean": 3.8e-05,
+   "floor_p95": 0.000397,
+   "beats_floor": false
+  },
+  {
+   "k": 2,
+   "added": "tfm4_cal",
+   "dev": 0.000599,
+   "eval": 0.00063,
+   "floor_mean": 5.8e-05,
+   "floor_p95": 0.000515,
+   "beats_floor": true
+  },
+  {
+   "k": 3,
+   "added": "lagd28",
+   "dev": 0.000609,
+   "eval": 0.000603,
+   "floor_mean": 6.8e-05,
+   "floor_p95": 0.000492,
+   "beats_floor": true
+  },
+  {
+   "k": 4,
+   "added": "c_ts2_avg_cal",
+   "dev": 0.000609,
+   "eval": 0.000603,
+   "floor_mean": 0.000137,
+   "floor_p95": 0.000515,
+   "beats_floor": true
+  }
+ ],
+ "greedy_set": [
+  "tfm4_tabless_cal",
+  "tfm4_cal",
+  "lagd28",
+  "c_ts2_avg_cal"
+ ]
+}
