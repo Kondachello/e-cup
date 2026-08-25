@@ -1,30 +1,12 @@
-"""Is the blend residual predictable by a model from OUTSIDE our zoo?
+"""ДИАГНОСТИЧЕСКИЙ ПРОБНИК, В РЕШЕНИЕ НЕ ВХОДИТ.
 
-The framing rule of the project ("a model whose prediction is a function of our 203
-features lies in the blend hull and contributes exactly zero") rests on evidence
-gathered with OUR OWN model families: LGB stacks on the residual gave OOF R^2 = -0.019
-(H1). That is evidence about gradient boosting, not about tabular space as such.
-
-TabPFN is a transformer pretrained on synthetic tabular tasks: a genuinely different
-prior, in-context rather than fitted. So it is the right instrument to cross-examine
-the theorem:
-
-    R^2 ~ 0  -> the theorem is confirmed by a tool from outside our zoo; the tabular
-               frame is closed for good and the team stops re-testing it.
-    R^2 > 0  -> the residual IS learnable, and the whole tabular space reopens.
-
-Design (three numbers, not one):
-  real      TabPFN fits on a context of rows from half A, predicts residuals in half B
-  placebo   identical run with the target shuffled -> calibrates "what R^2 does zero
-            look like at this n" (the project rule: every gain is compared to placebo)
-  ridge     a linear reference on the same split
-
-Contexts are subsampled (TabPFN caps at ~10k rows / 100 cols) and bagged, per the
-recipe in arXiv:2502.17361. Users are split by hash, so no user appears in both the
-context and the evaluation set.
-
-Run (CPU, hours - queue it):
-  USE_V2=1 USE_V3=1 .venv/bin/python work/scripts/tabpfn_probe.py --contexts 4
+Использует предобученную TabPFN-2.5 (Prior Labs, лицензия Apache-2.0) ЕДИНСТВЕННЫМ
+назначением: внешняя проверка теоремы оболочки — предсказуем ли остаток бленда из наших
+признаков инструментом с чужим приором. Результат ОТРИЦАТЕЛЬНЫЙ (mdl_flint хуже плацебо,
+KNOWLEDGE «пробник рамки»), в бленд не входит, ни один отгружаемый файл от него не
+зависит, в requirements.txt пакета сдачи не входит и не должен. Правило соревнования о
+предобученных моделях касается РЕШЕНИЯ; этот скрипт — измерительный стенд, и README
+пакета не должен утверждать «предобученные модели не используются» без этой оговорки.
 """
 from __future__ import annotations
 
