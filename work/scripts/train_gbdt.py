@@ -318,7 +318,8 @@ def main():
     # ЭФФЕКТИВНЫЕ параметры в отпечаток: умолчание --gap-days сменилось с 0 на 30,
     # поэтому одна и та же архивная команда до и после обучает РАЗНОЕ, а argv этого
     # не покажет — там только явно переданное.
-    note(gap_days=args.gap_days, n_train_anchors=len(tr_anchors), n_features=len(cols),
+    note(anchor_source=args.anchor_source, train_anchors=[a.isoformat() for a in tr_anchors],
+         gap_days=args.gap_days, n_train_anchors=len(tr_anchors), n_features=len(cols),
          model=args.model, objective=args.objective, seed=args.seed,
          es_metric=args.es_metric, n_anchors_flag=args.n_anchors or None,
          active_only=bool(args.active_only) or None)

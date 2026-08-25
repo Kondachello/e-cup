@@ -37,11 +37,15 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import VAL_ANCHOR, feature_cols, load_anchor, rmsle
-from exp_lib import available_train_anchors, load_matrix, log_score, note, save_preds
+from exp_lib import (available_train_anchors, load_matrix, log_score, note,
+                     protocol_train_anchors, save_preds)
 from model_io import save_lgb
 
 # Vintage = feature anchor read as a val forecast. LAG_DAYS names them by staleness.
 LAGS = (0, 14, 28, 42, 56, 70)
+
+# Источник набора обучающих якорей; выставляется из --anchor-source в main().
+ANCHOR_SOURCE = "protocol"
 MIXES = {"lagmix_a": {"lag0": 0.5, "lag14": 0.5},
          "lagmix_b": {"lag0": 0.6, "lag14": 0.25, "lag28": 0.15}}
 
@@ -52,7 +56,12 @@ def champion_anchors(cut: date) -> list[date]:
     Февральские якоря собраны без extra-тира (они нужны только год-назад окну
     febspec): чемпионские колонки на них не собираются, load_matrix падает на select.
     """
-    anchors = [a for a in available_train_anchors() if a <= cut]
+    # ПО ПРОТОКОЛУ, не по каталогу. Именно здесь проблему и нашли: 24.08 попытка
+    # воспроизвести lagd28 подхватила 11 обучающих якорей вместо 9, потому что рядом
+    # построили два лишних под другую проверку, — и совпало всё только после возврата
+    # каталога к канону. Набор ОБЯЗАН зависеть от протокола, а не от того, что лежит
+    # на диске. `--anchor-source disk` возвращает прежнее поведение для старых артефактов.
+    anchors = [a for a in protocol_train_anchors(source=ANCHOR_SOURCE) if a <= cut]
     if os.environ.get("USE_V2"):
         from common import FEATURES_DIR
         anchors = [a for a in anchors
@@ -64,6 +73,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lags", type=str, default="0,14,28",
                     help="feature vintages to score, in days of staleness before the val anchor")
+    ap.add_argument("--anchor-source", choices=["protocol", "disk"], default="protocol",
+                    help="откуда брать обучающие якоря: protocol — train_anchors(14), не "
+                         "зависит от каталога (умолчание); disk — историческое поведение")
     ap.add_argument("--prefix", type=str, default="lag", help="prediction name prefix")
     ap.add_argument("--mixes", action="store_true", help="also emit the two log-space mixes")
     ap.add_argument("--rounds", type=int, default=2500)
@@ -79,6 +91,8 @@ def main():
     ap.add_argument("--test-only", type=int, default=0, metavar="VAL_ITER",
                     help="skip the val pass and emit only test preds, reusing a known val it=")
     args = ap.parse_args()
+    global ANCHOR_SOURCE
+    ANCHOR_SOURCE = args.anchor_source
     assert os.environ.get("USE_V2") and os.environ.get("USE_V3"), \
         "run with USE_V2=1 USE_V3=1 (champion feature set available locally)"
     t0 = time.time()
@@ -113,7 +127,8 @@ def main():
     print(f"{len(cols)} features", flush=True)
     # Число обучающих якорей val-стороны задаёт множитель итераций тестового
     # переобучения, а сам набор берётся с диска — записываем оба факта.
-    note(n_val_anchors=len(tr_anchors), n_features=len(cols), lags=args.lags,
+    note(anchor_source=ANCHOR_SOURCE, val_train_anchors=[a.isoformat() for a in tr_anchors],
+         n_val_anchors=len(tr_anchors), n_features=len(cols), lags=args.lags,
          objective=args.objective, seed=args.seed, train_cutoff=gap_cut.isoformat())
 
     tr = load_matrix(tr_anchors, columns=["target"] + cols)
