@@ -348,27 +348,76 @@ class GridPrefetcher:
         self.st, self.tab, self.b = store, tab, batch
         self.grid = torch.tensor(sorted(grid))
         self.stop = False
+        # Живость потоков. Нехватка ОЗУ на хосте — состояние ПРЕХОДЯЩЕЕ: страницы
+        # memmap вытесняются, и через мгновение та же аллокация проходит. Раньше
+        # такой сбой убивал поток молча, а get() блокировался на q.get() без
+        # таймаута — прогон вис навсегда. Теперь поток переживает сбой, а если
+        # умирают все, get() падает с внятным текстом вместо зависания.
+        self.alive = workers
+        self.lock = threading.Lock()
+        self.fatal = None
+        self.retries = 0
         self.th = [threading.Thread(target=self._run, daemon=True) for _ in range(workers)]
         for t in self.th: t.start()
 
+    @staticmethod
+    def _is_oom(e):
+        t = str(e)
+        return isinstance(e, MemoryError) or 'not enough memory' in t or 'DefaultCPUAllocator' in t
+
     def _run(self):
+        import time
         st, B, G = self.st, self.b, self.grid
-        while not self.stop:
-            u = torch.randint(0, st.n_u, (B,))
-            an = G[torch.randint(0, len(G), (B,))]
-            for _ in range(4):
-                bad = ~st.valid_tr[u, an]
-                if not bad.any(): break
-                an[bad] = G[torch.randint(0, len(G), (int(bad.sum()),))]
-            keep = st.valid_tr[u, an]
-            u, an = u[keep], an[keep]
-            out = st.cpu_batch(u, an)
-            if self.tab is not None:
-                out['tab'] = self.tab.gather(u, an)
-            self.q.put(out)
+        miss = 0
+        try:
+            while not self.stop:
+                try:
+                    u = torch.randint(0, st.n_u, (B,))
+                    an = G[torch.randint(0, len(G), (B,))]
+                    for _ in range(4):
+                        bad = ~st.valid_tr[u, an]
+                        if not bad.any(): break
+                        an[bad] = G[torch.randint(0, len(G), (int(bad.sum()),))]
+                    keep = st.valid_tr[u, an]
+                    u, an = u[keep], an[keep]
+                    out = st.cpu_batch(u, an)
+                    if self.tab is not None:
+                        out['tab'] = self.tab.gather(u, an)
+                except Exception as e:
+                    if not self._is_oom(e):
+                        with self.lock: self.fatal = e
+                        raise
+                    miss += 1
+                    with self.lock:
+                        self.retries += 1
+                        n = self.retries
+                    if n in (1, 10, 100) or n % 500 == 0:
+                        print(f'  загрузчик: не хватило ОЗУ, повтор ({n}-й раз) — '
+                              f'освободи память на машине', flush=True)
+                    if miss > 2000:
+                        with self.lock: self.fatal = e
+                        raise
+                    time.sleep(0.25)
+                    continue
+                miss = 0
+                self.q.put(out)
+        finally:
+            with self.lock: self.alive -= 1
 
     def get(self):
-        return self.q.get()
+        import queue as _q
+        while True:
+            try:
+                return self.q.get(timeout=30)
+            except _q.Empty:
+                with self.lock:
+                    alive, fatal = self.alive, self.fatal
+                if alive == 0:
+                    raise RuntimeError(
+                        'все потоки загрузчика умерли, обучение продолжать нечем. '
+                        + (f'причина: {fatal!r}. ' if fatal else '')
+                        + 'Если это нехватка ОЗУ — освободи память на хосте и перезапусти: '
+                          'очередь пропустит уже готовые прогоны.')
 
 
 # ------------------------------------------------------------------ обучение
