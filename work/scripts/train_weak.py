@@ -83,7 +83,8 @@ def ftype_keep(cols: list[str], kind: str) -> list[str]:
     return sorted(set(keep), key=lambda c: order[c])
 
 
-def pick_anchors(k: int, seed: int, pool_last: int, gap: int = 30) -> list:
+def pick_anchors(k: int, seed: int, pool_last: int, gap: int = 30,
+                 source: str = "protocol") -> list:
     """k случайных обучающих срезов из ЧИСТОГО пула (зазор gap дней до val).
 
     Пул чистится по зазору ЗДЕСЬ, чтобы k был честным числом обучающих срезов:
@@ -94,7 +95,7 @@ def pick_anchors(k: int, seed: int, pool_last: int, gap: int = 30) -> list:
     from datetime import timedelta
 
     from common import FEATURES_DIR
-    from exp_lib import available_train_anchors
+    from exp_lib import protocol_train_anchors
 
     def tiers_ok(a) -> bool:
         """Срезы фев-2025 не имеют тира v2 (.extra) — данные начинаются 2025-01-01.
@@ -106,7 +107,11 @@ def pick_anchors(k: int, seed: int, pool_last: int, gap: int = 30) -> list:
                    for t in need)
 
     cut = VAL_ANCHOR - timedelta(days=gap)
-    allow = [a for a in available_train_anchors() if a <= cut and tiers_ok(a)]
+    # ПУЛ ПО ПРОТОКОЛУ, а не по каталогу. В таблице ретрейна 25.08 weak_an_d разошёлся
+    # сильнее всех (сырой скор 1.683269 против 1.695393, Δ бленда +0.000093) именно из-за
+    # этой строки: sel_seed выбирает k якорей ИЗ ПУЛА, а пул был размером с каталог, и на
+    # другой машине выбиралась другая четвёрка — то есть обучалась другая модель.
+    allow = [a for a in protocol_train_anchors(source=source) if a <= cut and tiers_ok(a)]
     if pool_last:
         allow = allow[-pool_last:]
     rng = np.random.default_rng(seed)
@@ -121,6 +126,9 @@ def main():
                     choices=["subspace", "anchors", "ftype", "tiny"])
     ap.add_argument("--frac", type=float, default=0.20,
                     help="subspace: доля из 203 признаков (0.15..0.25)")
+    ap.add_argument("--anchor-source", choices=["protocol", "disk"], default="protocol",
+                    help="откуда берётся ПУЛ обучающих срезов: protocol — train_anchors(14), "
+                         "не зависит от каталога (умолчание); disk — историческое поведение")
     ap.add_argument("--sel-seed", type=int, default=0,
                     help="сид ОТБОРА (подпространства / срезов); не сид обучения")
     ap.add_argument("--k-anchors", type=int, default=3, help="anchors: сколько срезов")
@@ -144,7 +152,8 @@ def main():
             raise SystemExit("--mech ftype requires --ftype")
         keep = ftype_keep(cols, args.ftype)
     elif args.mech == "anchors":
-        sub_anchors = pick_anchors(args.k_anchors, args.sel_seed, args.anchor_pool)
+        sub_anchors = pick_anchors(args.k_anchors, args.sel_seed, args.anchor_pool,
+                                   source=args.anchor_source)
 
     drop = [c for c in cols if c not in set(keep)]
     print(f"[weak] {args.name}: mech={args.mech} keep={len(keep)}/{len(cols)} feats", flush=True)
@@ -172,11 +181,13 @@ def main():
                 + f"; {len(keep)} feats")
         argv += ["--notes", note]
 
+    argv += ["--anchor-source", args.anchor_source]
+
     import train_gbdt
     if sub_anchors is not None:
         # обеднение по срезам: подменяем источник срезов И для обучения, И для
         # gap-фазы ретрейна, чтобы модель никогда не увидела остальные срезы
-        train_gbdt.available_train_anchors = lambda _a=sub_anchors: list(_a)
+        train_gbdt.anchor_pool = lambda _a=sub_anchors: list(_a)
     sys.argv = ["train_gbdt.py"] + argv
     train_gbdt.main()
 
