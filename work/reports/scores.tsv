@@ -560,3 +560,12 @@ TFM4_CHECK	-	Независимая проверка tfm4: tfm4_cal запас +
 kostya46s3_cal	1.670188	binned log-shift calibration of kostya46s3; holdout 1.702653->1.670643
 kostya46a13_cal	1.669760	binned log-shift calibration of kostya46a13; holdout 1.702406->1.670246
 KOSTYA46_S3	-	Сид-3 kostya46 закрыт: соло s3 кал. 1.670188, avg(s1,s3) 1.669760 (соло лучше s1 на 0.00035), но joint_gain добавкой -0.000004/-0.000005 — НОЛЬ, сидовый шум поглощён блендом, как и при закрытии s1+s2. Сиды 4-5 не гонять
+weak_an_d_rt	1.695393	weak/anchors k=4 sel_seed=77; 203 feats
+weak_ft_recency_rt	1.730688	weak/ftype ftype=recency; 21 feats
+c_ts2_s42_rt	1.696260	lgb/two_stage
+febspec2_rt	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
+weak_an_d_rt_cal	1.672794	binned log-shift calibration of weak_an_d_rt; holdout 1.696216->1.673505
+weak_ft_recency_rt_cal	1.701313	binned log-shift calibration of weak_ft_recency_rt; holdout 1.731657->1.702014
+c_ts2_s42_rt_cal	1.668328	binned log-shift calibration of c_ts2_s42_rt; holdout 1.696623->1.668819
+febspec2_rt_cal	1.770665	binned log-shift calibration of febspec2_rt; holdout 1.782185->1.768060
+RETRAIN_TABLE	-	Таблица отгружено/ретрейн/Δ: переобучено 20.5% веса бленда, сдвиг решения +0.000151 (6.9 шума). Побитово совпали febspec2, wklin, wklin_wk (набор якорей пинится протоколом); дрейфуют weak_an_d +0.000093 и weak_ft_recency +0.000055 — оба берут якоря ИЗ КАТАЛОГА. weak_an_d выбирает 4 из пула по sel_seed=77, сырой скор разошёлся на 0.012 — обучилась другая модель. Третье подтверждение той же переменной после lag_tta и wklin
