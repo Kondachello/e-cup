@@ -138,7 +138,7 @@
 ## Запуск
 
 ```bash
-python3.10 -m venv .venv && .venv/bin/pip install -r solution_lbmix2/requirements.txt lifetimes torch
+python3.10 -m venv .venv && .venv/bin/pip install -r final_submission/requirements.txt
 # train.parquet и sample_submit.csv положить в корень репозитория
 .venv/bin/python work/scripts/build_features.py --preset all
 .venv/bin/python work/scripts/build_features_v2.py
