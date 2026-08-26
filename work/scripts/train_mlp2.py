@@ -146,6 +146,24 @@ def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag="
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=epochs, eta_min=cfg["lr"] * 0.01)
     n, bs, bce_w = X.shape[0], cfg["bs"], cfg["bce_w"]
+    # --m2bce: построчные веса BCE-головы w_i=(log1p(gmv)+1)^2, нормированные на
+    # среднее=1 по фактическим строкам ЭТОГО обучения (selection и full-ретрейн
+    # нормируются каждый по своим строкам). ylog уже в log1p-пространстве; у
+    # нулевых таргетов ylog=0 -> вес 1 до нормировки. MSE-голову не трогает.
+    wt = None
+    if cfg.get("m2bce"):
+        w64 = (ylog.astype(np.float64) + 1.0) ** 2
+        pre_mean = float(w64.mean())
+        w64 /= pre_mean
+        print(f"{tag}[m2bce] rows={len(w64)} pre-norm mean={pre_mean:.4f}; "
+              f"normalized min={w64.min():.4f} mean={w64.mean():.4f} "
+              f"max={w64.max():.4f}", flush=True)
+        wt = w64.astype(np.float32)
+    # --m2bce-mu (вариант-2): вес строки = (clamp(mu,0)+1)^2 из mu-головы ТЕКУЩЕГО
+    # батча (detach — вес не даёт градиента), нормировка на среднее=1 в батче.
+    # Симметрично к исходу: штрафует ошибку гейта по ПРОГНОЗУ величины чека, а не
+    # по факту покупки (асимметрия --m2bce ломала калибровку p).
+    mu_w = bool(cfg.get("m2bce_mu"))
     best, best_epoch, bad, best_state = np.inf, 0, 0, None
     steps = 0
     for ep in range(1, epochs + 1):
@@ -160,7 +178,24 @@ def train_one(X, ylog, Xv, ylv, cfg, seed, device, epochs, max_steps=None, tag="
             yb = torch.from_numpy(ylog[idx]).to(device)
             pos = yb > 0
             logit, mu = model(xb)
-            bce = F.binary_cross_entropy_with_logits(logit, pos.float())
+            if wt is not None:
+                # reduction='none' + веса + mean; без флагов ветка ниже — прежний
+                # вызов без изменений (численно идентичен старому поведению)
+                wb = torch.from_numpy(wt[idx]).to(device)
+                bce = (wb * F.binary_cross_entropy_with_logits(
+                    logit, pos.float(), reduction="none")).mean()
+            elif mu_w:
+                wb = (torch.clamp(mu.detach(), min=0) + 1.0) ** 2
+                if i == 0:
+                    print(f"{tag}[m2bce-mu] ep {ep} batch0 w pre-norm "
+                          f"min={float(wb.min()):.4f} mean={float(wb.mean()):.4f} "
+                          f"max={float(wb.max()):.4f} (в лоссе нормирован на "
+                          f"среднее=1 по батчу)", flush=True)
+                wb = wb / wb.mean()
+                bce = (wb * F.binary_cross_entropy_with_logits(
+                    logit, pos.float(), reduction="none")).mean()
+            else:
+                bce = F.binary_cross_entropy_with_logits(logit, pos.float())
             if pos.any():
                 mse = F.mse_loss(mu[pos], yb[pos])
             else:
@@ -238,6 +273,14 @@ def main():
     ap.add_argument("--wd", type=float, default=1e-4)
     ap.add_argument("--dropout", type=float, default=0.15)
     ap.add_argument("--bce-w", type=float, default=0.7)
+    ap.add_argument("--m2bce", action="store_true",
+                    help="построчные веса BCE-головы w=(log1p(gmv)+1)^2, нормированные "
+                         "на среднее=1: ошибка гейта на юзере с большим чеком стоит в "
+                         "RMSLE ~ mu^2. MSE-голову и поведение без флага не меняет")
+    ap.add_argument("--m2bce-mu", action="store_true",
+                    help="вариант-2 m2-BCE: веса BCE-головы = (clamp(mu,0)+1)^2 из "
+                         "mu-головы текущего батча (detach), нормировка на среднее=1 "
+                         "в батче; симметрично к исходу. Взаимно исключим с --m2bce")
     ap.add_argument("--hidden", type=str, default="512,256")
     ap.add_argument("--drop-cols", type=str, default="")
     ap.add_argument("--feat-prep", choices=PREP_MODES, default="clip99",
@@ -283,6 +326,12 @@ def main():
     cfg = dict(hidden=[int(h) for h in args.hidden.split(",")], dropout=args.dropout,
                lr=args.lr, wd=args.wd, bs=args.batch, patience=args.patience,
                bce_w=args.bce_w)
+    assert not (args.m2bce and args.m2bce_mu), "--m2bce и --m2bce-mu взаимно исключимы"
+    if args.m2bce:
+        cfg["m2bce"] = True   # ключ появляется ТОЛЬКО при флаге: cfg печатается и
+                              # уходит в meta, без флага оба остаются байт-в-байт
+    if args.m2bce_mu:
+        cfg["m2bce_mu"] = True
     print(f"device={device} seeds={seeds} smoke={args.smoke} cfg={cfg}", flush=True)
 
     t0 = time.time()
@@ -388,6 +437,10 @@ def main():
         notes = f"{notes}; es={args.es_metric}"
     if args.feat_prep != "clip99":
         notes = f"{notes}; prep={args.feat_prep}"
+    if args.m2bce:
+        notes = f"{notes}; m2bce"
+    if args.m2bce_mu:
+        notes = f"{notes}; m2bce-mu"
     log_score(args.name, score, notes)
 
     if args.no_test:

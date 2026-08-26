@@ -86,7 +86,9 @@ MEASURED: list[tuple[str, str, float]] = [
     ("G2_gru_tfm_02",    "G2_gru_tfm_02.csv",              1.6471581395000000),
     # --- T-серия (tfm4, залив трека 5). Точные скоры найдены 26.08 в
     # work/zhenya_eda/subs.json; CSV обоих файлов остались на машине трека 5 —
-    # достать с платформы или из их артефактов, до тех пор load_basis не соберётся.
+    # достать с платформы или из их артефактов; до тех пор load_basis пропускает
+    # их с громким предупреждением. Реконструкции под этими именами НЕ класть
+    # (запрет work/reports/t_restore.md — испортит спан-базис).
     # Алгебра параболы по двум дозам: база T-серии = G2 (F0=1.6471583, совпадение
     # с G2 до 2e-7), q оси 0.003041, κ=0.459.
     ("T1_tfm4_orth_090", "T1_tfm4_orth_090.csv",           1.6471433387910561),
@@ -98,6 +100,14 @@ MEASURED: list[tuple[str, str, float]] = [
     # mdl_kyanit — зонд оси erafix полным шагом на базе T3: κ = −0.0088 ± 0.1444, ось
     # закрыта (ERAFIX_CLOSED в KNOWLEDGE). Файл остаётся в спане как замеренный.
     ("E1_erafix_full",   "E1_erafix_full.csv",             1.6477353035),
+    # спан-базиса. После них κ любой пересборки из этих членов — точная алгебра.
+    # mdl_talc — зонд полного шага оси «пересборка бленда» (blend_reopt_z, OOF 1.6648)
+    # с базы T3: κ = 0.1131 ± 0.0467 — классовый приор R (0.53-0.62) не сработал.
+    # Доза усадкой κ̂=0.124, урожай 5.3 шума (R8_zharvest_012).
+    ("R7_zreopt",        "R7_zreopt.csv",                  1.6527651078),
+    # R8 — урожай оси mdl_talc дозой κ̂=0.124: расчёт 1.6468365, факт лёг в 2.7e-6.
+    # НОВЫЙ ЛУЧШИЙ честный файл (T3 −0.0000984). Наследует всю цепочку T3.
+    ("R8_zharvest_012",  "R8_zharvest_012.csv",            1.6468337517),
 
 ]
 
@@ -118,14 +128,48 @@ def read_lp(path: Path | str) -> tuple[np.ndarray, np.ndarray]:
             np.log1p(np.clip(d[col].to_numpy().astype(np.float64), 0, None)))
 
 
+def _measured_on_disk() -> tuple[list[tuple[str, str, float]], list[str]]:
+    """Записи MEASURED, чьи csv физически есть на диске, + имена отсутствующих.
+
+    Отсутствующие файлы НЕ реконструируются и НЕ создаются (запрет
+    work/reports/t_restore.md): их скоры остаются в MEASURED как знание,
+    но в спан-базис такие файлы не входят.
+    """
+    have, missing = [], []
+    for rec in MEASURED:
+        try:
+            _resolve(rec[1])
+            have.append(rec)
+        except FileNotFoundError:
+            missing.append(rec[1])
+    return have, missing
+
+
 def load_basis(rebuild: bool = False) -> dict:
-    """Матрица направлений замеренных файлов + валидационный таргет (с кэшем)."""
+    """Матрица направлений замеренных файлов + валидационный таргет (с кэшем).
+
+    Файлы MEASURED, отсутствующие на диске, ПРОПУСКАЮТСЯ с громким
+    предупреждением в stderr (см. _measured_on_disk); базис и кэш собираются
+    из остальных. Кэш валиден, только если его список имён и скоры совпадают
+    с доступной частью MEASURED (новая запись или правка скора => пересборка).
+    """
+    have, missing = _measured_on_disk()
+    if missing:
+        print(f"⚠ ПРЕДУПРЕЖДЕНИЕ predict_lb: {len(missing)} замеренных файлов НЕТ на "
+              f"диске, базис собран БЕЗ них (скоры в MEASURED сохранены; "
+              f"реконструкцию не класть — work/reports/t_restore.md): "
+              + ", ".join(missing), file=sys.stderr)
+    names = [n for n, _, _ in have]
+    if ANCHOR not in names:
+        raise FileNotFoundError(f"якорь {ANCHOR} отсутствует на диске — базис не собрать")
+    f = np.array([s for _, _, s in have])
     if CACHE.exists() and not rebuild:
         z = np.load(CACHE, allow_pickle=True)
-        if len(z["names"]) == len(MEASURED):
-            return {k: z[k] for k in z.files} | {"names": [str(x) for x in z["names"]]}
+        cached = [str(x) for x in z["names"]]
+        if cached == names and np.allclose(z["f"], f):
+            return {k: z[k] for k in z.files} | {"names": cached}
     uid0, rows = None, []
-    for _, fn, _ in MEASURED:
+    for _, fn, _ in have:
         uid, lp = read_lp(fn)
         if uid0 is None:
             uid0 = uid
@@ -137,8 +181,6 @@ def load_basis(rebuild: bool = False) -> dict:
     if not np.array_equal(v["user_id"].to_numpy(), uid0):
         raise ValueError("val-таргет не совпадает по user_id с сабмитами")
     tval = np.log1p(np.clip(v["target"].to_numpy().astype(np.float64), 0, None))
-    names = [n for n, _, _ in MEASURED]
-    f = np.array([s for _, _, s in MEASURED])
     np.savez_compressed(CACHE, L=L, tval=tval, uid=uid0, f=f, names=np.array(names))
     return dict(L=L, tval=tval, uid=uid0, f=f, names=names)
 

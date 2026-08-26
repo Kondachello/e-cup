@@ -82,6 +82,40 @@ def recency_weights(tr_rec, val_rec, floor: float, cap: float = 5.0):
     return ratio[tb]
 
 
+def m2bce_weights(y_raw):
+    """--m2bce: веса строк для БИНАРНОЙ головы two_stage (стадия 1).
+
+    Ошибка классификатора «купит/не купит» на юзере с большим чеком стоит в
+    RMSLE ~ (log1p(gmv))^2, а обычный BCE всем строкам даёт цену 1. Вес
+    считается от таргета в log1p-пространстве: w_i = (z_i+1)^2, z = log1p(gmv);
+    у нулевых таргетов z=0 -> вес 1 до нормировки. Нормируется на среднее=1 по
+    фактическим строкам обучения стадии, иначе поедет эффективный lr /
+    регуляризация."""
+    z = np.log1p(np.clip(np.asarray(y_raw, dtype=np.float64), 0, None))
+    ww = (z + 1.0) ** 2
+    pre_mean = float(ww.mean())
+    ww /= pre_mean
+    print(f"[m2bce] rows={len(ww)} pre-norm mean={pre_mean:.4f}; normalized "
+          f"min={ww.min():.4f} mean={ww.mean():.4f} max={ww.max():.4f}", flush=True)
+    return ww
+
+
+def m2mu_weights(mu_hat):
+    """--m2bce-mu (вариант-2): вес строки = (clip(μ̂,0)+1)^2, нормированный на среднее=1.
+
+    μ̂ — предсказание стадии 2 E[log1p(gmv)|покупка] на ВСЕХ строках трейна
+    (in-sample допустимо: это только вес). В отличие от --m2bce (таргет-веса,
+    асимметрия позитивы/негативы ломает калибровку p), здесь ошибка p у юзера с
+    потенциально большим чеком штрафуется сильнее НЕЗАВИСИМО от исхода."""
+    mu = np.clip(np.asarray(mu_hat, dtype=np.float64), 0, None)
+    ww = (mu + 1.0) ** 2
+    pre_mean = float(ww.mean())
+    ww /= pre_mean
+    print(f"[m2bce-mu] rows={len(ww)} pre-norm mean={pre_mean:.4f}; normalized "
+          f"min={ww.min():.4f} mean={ww.mean():.4f} max={ww.max():.4f}", flush=True)
+    return ww
+
+
 def anchor_weights(anchors, rows_per_anchor, tau):
     if not tau:
         return None
@@ -242,6 +276,17 @@ def main():
                          "(O6, the soft version of --active-only); FLOOR is the smallest "
                          "weight a row may get, e.g. 0.05. 0 disables. MEASURED: hurts "
                          "(1.6894 control -> 1.6909), kept for the record.")
+    ap.add_argument("--m2bce", action="store_true",
+                    help="two_stage only: домножить веса строк СТАДИИ 1 (binary) на "
+                         "нормированный (log1p(gmv)+1)^2 — ошибка классификатора на "
+                         "юзере с большим чеком стоит в RMSLE ~ mu^2, стандартный BCE "
+                         "это игнорирует. Стадию 2 и поведение без флага не меняет")
+    ap.add_argument("--m2bce-mu", action="store_true",
+                    help="two_stage only, вариант-2 m2-BCE: веса стадии 1 = "
+                         "нормированный (clip(mu_hat,0)+1)^2, где mu_hat — in-sample "
+                         "прогноз стадии 2 на ВСЕХ строках (обучается первой). "
+                         "Симметрично к исходу, в отличие от --m2bce. Взаимно "
+                         "исключим с --m2bce; --es-metric cal не поддержан")
     ap.add_argument("--drop-cols", type=str, default="")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--threads", type=int, default=0)
@@ -278,6 +323,13 @@ def main():
     global _ANCHOR_SOURCE
     _ANCHOR_SOURCE = args.anchor_source
     es_cal = args.es_metric == "cal"
+    assert not args.m2bce or args.objective == "two_stage", \
+        "--m2bce требует --objective two_stage (вес относится к бинарной голове)"
+    assert not args.m2bce_mu or args.objective == "two_stage", \
+        "--m2bce-mu требует --objective two_stage (вес относится к бинарной голове)"
+    assert not (args.m2bce and args.m2bce_mu), "--m2bce и --m2bce-mu взаимно исключимы"
+    assert not (args.m2bce_mu and es_cal), \
+        "--m2bce-mu меняет порядок стадий (стадия 2 первой), es-metric cal не поддержан"
     assert not es_cal or args.model == "lgb", "--es-metric cal is implemented for --model lgb only"
     assert args.es_period >= 1, "--es-period must be >= 1"
     # The stopping point is what a paired raw-vs-cal measurement needs to see, so it is
@@ -322,7 +374,8 @@ def main():
          gap_days=args.gap_days, n_train_anchors=len(tr_anchors), n_features=len(cols),
          model=args.model, objective=args.objective, seed=args.seed,
          es_metric=args.es_metric, n_anchors_flag=args.n_anchors or None,
-         active_only=bool(args.active_only) or None)
+         active_only=bool(args.active_only) or None,
+         m2bce=bool(args.m2bce) or None, m2bce_mu=bool(args.m2bce_mu) or None)
 
     tr = load_matrix(tr_anchors, columns=["user_id", "anchor_date", "target"] + cols)
     if args.active_only:
@@ -377,24 +430,41 @@ def main():
         # LEVEL, and AUC ignores level entirely).  The level of a two_stage model lives
         # in stage 2 (E[log1p|y>0]) — that is where the calibrated criterion is applied,
         # and it is applied to p_1 * mu, the whole forecast, not to mu alone.
-        m1, it1 = fitter(X, ybin, w, Xv, (yv_raw > 0).astype(np.float64), p1, "log_mse", args.seed)
         pos = y_raw > 0
         ylog_pos = np.log1p(y_raw[pos])
         wpos = w[pos] if w is not None else None
+        if args.m2bce_mu:
+            # вариант-2: стадия 2 (регрессия на позитивах) не зависит от стадии 1 —
+            # обучаем её ПЕРВОЙ, её in-sample μ̂ на всём трейне взвешивает стадию 1.
+            # Сама стадия 2 обучается ровно как раньше (те же строки/веса/сид).
+            m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv[yv_raw > 0],
+                             np.log1p(yv_raw[yv_raw > 0]), params2, "log_mse",
+                             args.seed + 1)
+            mw = m2mu_weights(predict(args.model, m2, X))
+            w1 = mw if w is None else w * mw
+        else:
+            # --m2bce: вес относится ТОЛЬКО к стадии 1; w не трогаем, чтобы стадия 2
+            # (wpos = w[pos]) осталась прежней.
+            w1 = w
+            if args.m2bce:
+                mw = m2bce_weights(y_raw)
+                w1 = mw if w is None else w * mw
+        m1, it1 = fitter(X, ybin, w1, Xv, (yv_raw > 0).astype(np.float64), p1, "log_mse", args.seed)
         p_val = predict(args.model, m1, Xv)
         if args.model == "cb":
             p_val = 1.0 / (1.0 + np.exp(-p_val))
-        if es_cal:
-            # stage 2 is validated on ALL val rows (not just the positives) so that the
-            # criterion sees exactly the forecast calibrate.py will see later.  Only the
-            # metric changes; stage 2 is still TRAINED on positives alone.
-            fev = make_cal_feval(
-                lambda mu, p=p_val: np.clip(p * np.clip(mu, 0, None), 0, None),
-                es_ly, yv_raw, es_half, args.es_bins, args.es_period, cal_secs)
-            m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv, np.log1p(yv_raw), params2,
-                             "log_mse", args.seed + 1, fev)
-        else:
-            m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv[yv_raw > 0], np.log1p(yv_raw[yv_raw > 0]), params2, "log_mse", args.seed + 1)
+        if not args.m2bce_mu:
+            if es_cal:
+                # stage 2 is validated on ALL val rows (not just the positives) so that the
+                # criterion sees exactly the forecast calibrate.py will see later.  Only the
+                # metric changes; stage 2 is still TRAINED on positives alone.
+                fev = make_cal_feval(
+                    lambda mu, p=p_val: np.clip(p * np.clip(mu, 0, None), 0, None),
+                    es_ly, yv_raw, es_half, args.es_bins, args.es_period, cal_secs)
+                m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv, np.log1p(yv_raw), params2,
+                                 "log_mse", args.seed + 1, fev)
+            else:
+                m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv[yv_raw > 0], np.log1p(yv_raw[yv_raw > 0]), params2, "log_mse", args.seed + 1)
         mu_val = predict(args.model, m2, Xv)
         pv = np.expm1(np.clip(p_val * np.clip(mu_val, 0, None), 0, None))
     else:
@@ -447,7 +517,9 @@ def main():
                  f"{np.mean(cal_secs) if cal_secs else 0:.3f}s each "
                  f"(period {args.es_period})" if es_cal else ""), flush=True)
     save_preds(args.name, "val", uid_val, pv)
-    log_score(args.name, score, args.notes or f"{args.model}/{args.objective}")
+    log_score(args.name, score, args.notes or
+              f"{args.model}/{args.objective}" + ("; m2bce" if args.m2bce else "")
+              + ("; m2bce-mu" if args.m2bce_mu else ""))
 
     if args.no_test:
         return
@@ -506,13 +578,25 @@ def main():
         raw_all = cat_y(y_raw, yv_raw)
         yb_all = (raw_all > 0).astype(np.float64)
         w_all = cat_w(w)
-        p1["n_estimators" if args.model != "cb" else "iterations"] = max(50, int(it1 * iter_mult))
-        m1f, _ = fitter(Xall, yb_all, w_all, None, None, p1, "log_mse", args.seed)
         pos_all = raw_all > 0
         ylog_all = np.log1p(raw_all[pos_all])
         wpos_all = w_all[pos_all] if w_all is not None else None
+        p1["n_estimators" if args.model != "cb" else "iterations"] = max(50, int(it1 * iter_mult))
         params2["n_estimators" if args.model != "cb" else "iterations"] = max(50, int(it2 * iter_mult))
-        m2f, _ = fitter(Xall[pos_all], ylog_all, wpos_all, None, None, params2, "log_mse", args.seed + 1)
+        if args.m2bce_mu:
+            # вариант-2 и в ретрейне: стадия 2 первой, её μ̂ по всем строкам
+            # (train+gap+val) взвешивает финальную стадию 1
+            m2f, _ = fitter(Xall[pos_all], ylog_all, wpos_all, None, None, params2, "log_mse", args.seed + 1)
+            mw_all = m2mu_weights(predict(args.model, m2f, Xall))
+            w1_all = mw_all if w_all is None else w_all * mw_all
+            m1f, _ = fitter(Xall, yb_all, w1_all, None, None, p1, "log_mse", args.seed)
+        else:
+            w1_all = w_all
+            if args.m2bce:
+                mw_all = m2bce_weights(raw_all)
+                w1_all = mw_all if w_all is None else w_all * mw_all
+            m1f, _ = fitter(Xall, yb_all, w1_all, None, None, p1, "log_mse", args.seed)
+            m2f, _ = fitter(Xall[pos_all], ylog_all, wpos_all, None, None, params2, "log_mse", args.seed + 1)
         # freeze: retrained boosters -> work/models/ (stage1 = P(y>0), stage2 = E[log1p|>0])
         save_booster(args.model, args.name, m1f, tag="stage1")
         save_booster(args.model, args.name, m2f, tag="stage2")
@@ -548,6 +632,8 @@ def main():
               seed=args.seed, gap_days=args.gap_days, detrend=bool(args.detrend),
               **({"es_metric": "cal", "es_bins": args.es_bins,
                   "es_period": args.es_period} if es_cal else {}),
+              **({"m2bce": True} if args.m2bce else {}),
+              **({"m2bce_mu": True} if args.m2bce_mu else {}),
               m_hat_test=float(m_hat_test), active_only=bool(args.active_only),
               weight_tau=args.weight_tau, n_anchors=len(tr_anchors),
               val_rmsle=float(score),

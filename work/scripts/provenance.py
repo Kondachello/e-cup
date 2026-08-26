@@ -40,7 +40,8 @@ def note(**kv) -> None:
     _RUN.update({k: v for k, v in kv.items() if v is not None})
 # Тиры признаков включаются переменными окружения — их состав меняет входную матрицу
 # и потому обязан попадать в отпечаток.
-_TIER_ENV = ("USE_V2", "USE_V3", "USE_V4", "USE_V5", "USE_V6", "USE_V7", "USE_V8", "USE_V10")
+_TIER_ENV = ("USE_V2", "USE_V3", "USE_V4", "USE_V5", "USE_V6", "USE_V7", "USE_V8",
+             "USE_V10", "USE_V11")
 
 
 def _sha256(path: Path, chunk: int = 1 << 22) -> str:
@@ -76,7 +77,8 @@ def _versions() -> dict:
 
 
 _TIER_FILE = {"USE_V2": "extra", "USE_V3": "v3", "USE_V4": "v4", "USE_V5": "v5",
-              "USE_V6": "v6", "USE_V7": "v7", "USE_V8": "v8", "USE_V10": "v10"}
+              "USE_V6": "v6", "USE_V7": "v7", "USE_V8": "v8", "USE_V10": "v10",
+              "USE_V11": "v11"}
 
 
 def _tiers_on_disk(feats, anchors: list[str]) -> dict:
