@@ -64,3 +64,6 @@ _br_*.tgz
 _new_preds.zip
 _snap/
 from_sasha/
+
+# кэш признаков erafix (1.5 ГБ, пересобирается v1b_run_local за ~20 мин)
+work/zhenya_eda/out/erafix_feat.npz

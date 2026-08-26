@@ -31,6 +31,7 @@ SUB = ROOT / "submissions"
 DIR = ROOT / "work" / "zhenya_eda" / "out" / "dir_erafix.parquet"
 
 BASES = [  # по убыванию скора; берём первый существующий
+    ("T3_g1_redose_044", 1.6469321992541033),
     ("T2_tfm4_orth_045", 1.6469638837149883),
     ("G2_gru_tfm_02", 1.6471581395231711),
 ]
