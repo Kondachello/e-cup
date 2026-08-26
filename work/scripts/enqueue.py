@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
-Q = Path("/Users/alexanderkondakov/ozon-cup/work/queue")
-Q.mkdir(exist_ok=True)
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
+Q = ROOT / "work" / "queue"
+Q.mkdir(parents=True, exist_ok=True)
 
 
 def enqueue(prio: int, name: str, cmd: str, env: dict | None = None):
@@ -36,7 +38,7 @@ def snapshot_submissions():
     при заливке не ломало последующие расчёты (см. историю: файлы переименовывали 4 раза)."""
     import shutil
     from pathlib import Path
-    src = Path("/Users/alexanderkondakov/ozon-cup/submissions")
+    src = ROOT / "submissions"
     dst = src / "canonical"; dst.mkdir(exist_ok=True)
     n = 0
     for p in src.glob("*.csv"):

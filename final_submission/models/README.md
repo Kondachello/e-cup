@@ -1,13 +1,13 @@
-# models/ — обученные артефакты финального ансамбля
+# models/ — артефакты финального решения
 
-Сюда кладутся веса девяти моделей бленда. `../inference.py` читает отсюда всё,
-что нужно, и ничего не скачивает. Как обучить каждую модель — `../reproduce_training.md`.
+Сюда кладётся всё, что читает `../inference.py`, и ничего не скачивается.
+Как получить каждый артефакт — `../reproduce_training.md`.
 
-**Файлы создают сами трейнеры.** Каждый производственный трейнер на retrain-фазе
-вызывает `work/scripts/model_io.py` и пишет артефакты в `work/models/`.
-Инференс ищет файл сначала в этом каталоге, потом в `work/models/`, поэтому
-после переобучения ничего копировать вручную не обязательно — копирование нужно
-только чтобы собрать самодостаточный пакет сдачи.
+**Файлы весов создают сами трейнеры.** Производственный трейнер на retrain-фазе вызывает
+`work/scripts/model_io.py` и пишет артефакты в `work/models/`. Инференс ищет файл сначала
+в этом каталоге, потом в `work/models/`, поэтому после переобучения ничего копировать
+вручную не обязательно — копирование нужно только чтобы собрать самодостаточный пакет
+сдачи (команда — в `../README.md`, раздел «Упаковка»).
 
 Что уже есть, а чего не хватает, показывает:
 
@@ -17,52 +17,76 @@ python final_submission/inference.py --stage check
 
 ## Контракт именования
 
-`NAME` — значение `--name` у трейнера (`mlpziln`, `fusion_f`, `c_ts2_s42`, …).
+`NAME` — значение `--name` у трейнера (`mlpziln_c42`, `c_ts2_s7`, `weak_an_d`, …).
 
 | файл | что это | кто пишет |
 |---|---|---|
 | `NAME_meta.json` | порядок колонок признаков, конфиг архитектуры, сиды, флаги `USE_V*`, список файлов весов | `model_io.save_meta()` |
-| `NAME_stats.npz` | препроцессинг нейросетей: `med/lo/hi/mean/std` (+ `edges`/`centers` у биновой) | трейнер (как и раньше) |
+| `NAME_stats.npz` | препроцессинг нейросетей: `med/lo/hi/mean/std` | трейнер |
 | `NAME_seed{S}.pt` | `state_dict` torch-модели retrain-фазы, по одному на сид, тензоры на CPU | `model_io.save_torch()` |
 | `NAME.txt` | бустер LightGBM (`Booster.save_model`) | `model_io.save_lgb()` |
-| `NAME__TAG.txt` | бустер LightGBM подмодели TAG (`__search`/`__cat`, `__count`/`__aov`, `__stage1`/`__stage2`) | `model_io.save_lgb()` |
+| `NAME__TAG.txt` | бустер LightGBM подмодели TAG (`__stage1`/`__stage2`, `__count`/`__aov`) | `model_io.save_lgb()` |
 | `NAME.xgb.json` | бустер XGBoost | `model_io.save_xgb()` |
-| `NAME.cbm` | модель CatBoost (в финальном ансамбле не используется) | `model_io.save_cb()` |
 | `NAME_cal.npz` | поквантильная калибровка: `centers`, `shifts` | `calibrate.py` |
-| `NAME_chcal.npz` | канальная калибровка `channel2`: `k`, `{search,cat}_{centers,shifts}` | `train_channel.py` |
-| `preds_test/` | кэш стадии `predict` (создаётся инференсом) | `inference.py` |
+| `chain_test.npz` | замороженная цепочка (см. ниже) | `inference.py --stage freeze` |
+| `silence_p_test.npz` | вероятность молчания для 250 000 (кэш шага 6) | `inference.py --stage silence` |
+| `preds_test/` | кэш стадии `predict` | `inference.py` |
 
-## Что ожидается для каждой модели бленда
+## Что ожидается для 25 базовых моделей
 
-| модель | вес | веса модели | калибровка |
-|---|---|---|---|
-| `fusion_f` | 0.316 | `fusion_f_seed42.pt` + `fusion_f_stats.npz` | `fusion_f_cal.npz` |
-| `c_ts2_s42` | 0.246 | `c_ts2_s42__stage1.txt`, `c_ts2_s42__stage2.txt` | `c_ts2_s42_cal.npz` |
-| `mlpziln` | 0.122 | `mlpziln_seed{42,1337,7}.pt` + `mlpziln_stats.npz` | `mlpziln_cal.npz` |
-| `behavonly` | 0.080 | `behavonly.txt` | `behavonly_cal.npz` |
-| `countaov` | 0.074 | `countaov__count.txt`, `countaov__aov.txt` | `countaov_cal.npz` |
-| `seq2tr_f` | 0.070 | `seq2tr_f_seed{42,1337}.pt` | `seq2tr_f_cal.npz` |
-| `twl_v7` | 0.055 | `twl_v7.txt` | `twl_v7_cal.npz` |
-| `hmmsim` | 0.028 | **весов нет по построению** (см. ниже) | `hmmsim_cal.npz` |
-| `channel2` | 0.012 | `channel2__search.txt`, `channel2__cat.txt` | `channel2_cal.npz` |
+25 базовых моделей складываются в 20 членов бленда (три семейства усредняются по сидам).
+Полная таблица весов — `../reproduce_training.md` §5.
 
-Плюс `NAME_meta.json` для каждой из девяти.
+| базовая модель | веса | воспроизводимость |
+|---|---|---|
+| `mlpziln_c42`, `mlpziln_c1337`, `mlpziln_c7` | `NAME_seed{S}.pt` + `NAME_stats.npz` | веса сохраняются |
+| `c_ts2_s42`, `c_ts2_s7` | `NAME__stage1.txt`, `NAME__stage2.txt` | веса сохраняются |
+| `behavonly`, `behavonly_s1337`, `behavonly_s7` | `NAME.txt` | веса сохраняются |
+| `weak_an_d`, `weak_ft_recency`, `weak_ft_counts`, `weak_ft_long90` | `NAME.txt` | веса сохраняются |
+| `twl_v7` | `twl_v7.txt` | веса сохраняются |
+| `countaov_s7` | `countaov_s7__count.txt`, `countaov_s7__aov.txt` | веса сохраняются |
+| `c_xtw_s42` | `c_xtw_s42.xgb.json` | веса сохраняются |
+| `seq2tr_f` | `seq2tr_f_seed{42,1337}.pt` | веса сохраняются, но тензоры `work/seq2` удалены |
+| `fusion_v3c42`, `fusion_v3c555`, `fusion_v3c7`, `fusion_v3`, `fusion_v3ctl` | — | **весов нет: `train_fusion3.py` не вызывает `model_io`** |
+| `wklin`, `wklin_wk` | — | **весов нет: `train_wklin.py` не вызывает `model_io`** |
+| `febspec2` | — | **весов нет: `train_febspec2.py` не вызывает `model_io`** |
+| `hmmsim` | — | **весов нет по построению** (см. ниже) |
+
+Плюс `NAME_meta.json` у каждой модели, которая сохраняет веса, и `NAME_cal.npz` у каждого
+калиброванного члена бленда.
+
+Для четырёх последних групп артефактом является сам прогноз
+`work/preds/NAME_test.parquet`, и другого способа получить его, кроме повторного
+обучения, нет.
 
 `hmmsim` — генеративный симулятор: скрытая марковская модель оценивается EM по
-собственной истории каждого пользователя и таргет не видит вообще, поэтому
-обучаемых весов у неё нет. Её `hmmsim_meta.json` помечен `"stateless": true` и
-хранит гиперпараметры; инференс при отсутствии готового прогноза просто
-пересчитывает симулятор с тем же сидом (~6 мин).
+собственной истории каждого пользователя и таргет не видит вообще, поэтому обучаемых
+весов у неё нет. `hmmsim_meta.json` помечен `"stateless": true` и хранит гиперпараметры;
+инференс при отсутствии готового прогноза пересчитывает симулятор с тем же сидом (~6 мин).
 
-## Веса бленда и финальные два числа
+## chain_test.npz — измеренная цепочка
 
-Эти константы зашиты в `../inference.py` (а не в файл конфига), чтобы сабмит
-нельзя было испортить подменой json:
+Три вектора по 250 000. Каждый — **разность отправленных файлов, а не выход модели**,
+поэтому пересчитать их из весов нельзя и они входят в пакет как данные.
 
-* `BLEND_WEIGHTS` — NNLS-веса с валидации, канонический источник
-  `work/scripts/blend_testopt.py`, константа `W_VAL`;
-* `AFFINE_SLOPE = 1.0775792958468002`, `AFFINE_SHIFT = 0.006176042172469855` —
-  аффинная перенастройка в log1p, источник
-  `work/reports/blend_testopt_honest.json`, ключ `_affine`.
+| ключ | что это |
+|---|---|
+| `user_id` | порядок строк (отсортирован) |
+| `carry_lp` | накопленная цепочка LB-поправок: `ref_lp` минус приведённый к тем же моментам старый бленд `blend_cal`. Ровно то, что делает `make_candidate.py --carry-from blend_cal` |
 
-Что означает каждое число и откуда взято — `../reproduce_training.md` §5.
+
+`../reproduce_training.md` §7.4).
+
+## Константы, зашитые в inference.py
+
+Зашиты в код, а не в json, чтобы сабмит нельзя было испортить подменой конфига:
+
+* `BLEND_WEIGHTS` — 20 весов, источник `work/reports/blend_reopt.json`, ключ `winner`
+  (библиотека `B_plus_cal`, метод `ridge_free`, `alpha_rel` 1e-4). Сверка с текущим
+  отчётом: `inference.py --stage check --verify-blend`;
+* `REF_MEAN = 2.324718…`, `REF_SD = 1.632001…` — моменты log1p, замеренные на лидерборде;
+* `STEP = 0.469` — сила шага от опорного файла к новому кандидату;
+* `Q_REF = 0.0027149`, `P_LEVEL = 0.030843`, `A_OLD = 0.894`, `A_NEW = 0.65` — поправка на
+  молчащих.
+
+Что означает каждое число и откуда взято — `../reproduce_training.md` §6 и §7.

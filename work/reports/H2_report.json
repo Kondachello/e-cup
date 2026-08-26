@@ -1,0 +1,29 @@
+{
+ "val_without": 1.6661283172729544,
+ "val_with": 1.6656199814797892,
+ "val_gain_insample": -0.0005083357931652266,
+ "oof_gain_honest": -0.000443,
+ "w_tfm3_cal": 0.30532422660378294,
+ "delta_mean": 0.01253695163748254,
+ "delta_sd": 0.047478206789555985,
+ "variants": {
+  "H2_tfm.csv": {
+   "level_shift": 0.01253695163748254,
+   "rms_change": 0.04910555239799687,
+   "mean_pred_before": 41.23952051592911,
+   "mean_pred_after": 40.69143630521489
+  },
+  "H2_tfm_centered.csv": {
+   "level_shift": 2.773958840407431e-17,
+   "rms_change": 0.04747820678955598,
+   "mean_pred_before": 41.23952051592911,
+   "mean_pred_after": 40.172020751078875
+  },
+  "H2_tfm_half.csv": {
+   "level_shift": -5.266542757453863e-17,
+   "rms_change": 0.023739103394778,
+   "mean_pred_before": 41.23952051592911,
+   "mean_pred_after": 40.684697655487966
+  }
+ }
+}

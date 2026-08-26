@@ -7,6 +7,28 @@ Examples:
   train_gbdt.py --name lgb_2st_v1 --model lgb --objective two_stage
 Options: --n-anchors K (default all), --weight-tau DAYS (anchor recency weight,
 0=uniform), --drop-cols a,b,c , --threads N, --no-test (skip retrain+test preds)
+
+Early-stopping criterion (--es-metric, lgb only):
+  raw (default, historical behaviour)  LightGBM's own validation metric, i.e. plain
+    RMSE on whatever the target of this run is (log1p GMV for log_mse, raw GMV for
+    tweedie, AUC for the two_stage classifier).
+  cal                                  the honest CALIBRATED val RMSLE of the FINAL
+    forecast, computed inside a LightGBM custom eval (feval).  Every prediction file
+    goes through calibrate.py's binned log-shift before it reaches a blend, and that
+    calibration REWRITES THE LEVEL of the forecast.  So the raw criterion spends its
+    stopping decision on a level that is about to be overwritten for free, and pays
+    for it in RANKING, which calibration preserves.  Measured on the sequence models
+    (KNOWLEDGE.md, three seeds of three): calibrated val 1.670330 -> 1.668676 etc.,
+    mean -0.0028, with the stopping point moving from step 738 to 2706.
+    Honest cut: fit_shifts/apply_shifts are imported from calibrate.py and applied
+    ever calibrated by a shift table fitted on itself.
+    Cost: ~0.05 s per call on 250k rows.  Boosting evaluates every iteration, i.e.
+    thousands of times per run, so the calibrated metric is recomputed only every
+    --es-period iterations and the cached value is returned in between.  Patience
+    stays measured in ITERATIONS exactly as before (a repeated value never counts as
+    an improvement), only the grid of candidate stopping points gets coarser.
+    --es-metric never touches training itself: same seed, same rows, same trees.  It
+    only decides WHICH iteration is kept as best_iteration.
 """
 from __future__ import annotations
 
@@ -21,11 +43,32 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
+from calibrate import apply_shifts, fit_shifts
 from common import VAL_ANCHOR, TEST_ANCHOR, rmsle, load_anchor, feature_cols
 from exp_lib import available_train_anchors, load_matrix, save_preds, log_score
 from model_io import booster_filename, save_booster, save_meta
 
 RETRAIN_ITER_MULT = 1.07
+
+
+# Recency bins. The inference universe was selected as "active in the last 30 days", so
+# the 30+ bin has probability zero at val and test while carrying 6-8% of training rows.
+# Straight adversarial weighting p/(1-p) is degenerate here (F6: the classifier separates
+# anchors at AUC 1.0000 on calendar artefacts alone), so the ratio is taken on the one
+# axis where the shift was actually measured. Result was negative - see KNOWLEDGE.md.
+REC_BINS = [0, 1, 2, 3, 5, 8, 13, 21, 30]
+
+
+def recency_weights(tr_rec, val_rec, floor: float, cap: float = 5.0):
+    """w_i = p_inference(bin_i) / p_train(bin_i), clipped to [floor, cap]."""
+    tb = np.digitize(tr_rec, REC_BINS)
+    vb = np.digitize(val_rec, REC_BINS)
+    nb = len(REC_BINS) + 1
+    p_tr = np.bincount(tb, minlength=nb).astype(np.float64) / len(tb)
+    p_val = np.bincount(vb, minlength=nb).astype(np.float64) / len(vb)
+    ratio = np.clip(np.divide(p_val, p_tr, out=np.zeros(nb), where=p_tr > 0), floor, cap)
+    ratio /= (ratio[tb]).mean()          # keep the effective sample size comparable
+    return ratio[tb]
 
 
 def anchor_weights(anchors, rows_per_anchor, tau):
@@ -38,7 +81,55 @@ def anchor_weights(anchors, rows_per_anchor, tau):
     return np.concatenate(w)
 
 
-def fit_lgb(X, y, w, Xv, yv, params, objective, seed):
+def cal_rmsle_2fold(pred_log, ly, y_raw, half, bins):
+    """Honest calibrated val RMSLE of a checkpoint -> (pooled, single_fold).
+
+    Same transform as calibrate.py (fit_shifts / apply_shifts imported from it), but
+    the shift table is never applied to the rows it was fitted on: half A fits the
+    shifts that score half B and vice versa.  `pooled` scores all rows this way (the
+    criterion actually used); `single_fold` is only the B half, i.e. exactly the
+    number calibrate.py prints as `holdout`.  Both folds are honest, so using both is
+    the same estimator with half the variance — which matters here, because the
+    differences being resolved are ~1e-4.
+    """
+    lp = np.clip(np.asarray(pred_log, dtype=np.float64), 0, None)
+    out = np.empty_like(lp)
+    c_a, s_a = fit_shifts(lp[half], ly[half], bins)
+    out[~half] = apply_shifts(lp[~half], c_a, s_a)
+    c_b, s_b = fit_shifts(lp[~half], ly[~half], bins)
+    out[half] = apply_shifts(lp[half], c_b, s_b)
+    return (rmsle(y_raw, np.expm1(out)),
+            rmsle(y_raw[~half], np.expm1(out[~half])))
+
+
+def make_cal_feval(to_log1p, ly, y_raw, half, bins, period, stats):
+    """LightGBM custom eval returning the honest calibrated RMSLE of the FINAL forecast.
+
+    `to_log1p` maps this booster's validation output to log1p(predicted GMV) of the
+    WHOLE model (for two_stage that includes the frozen stage-1 probability), so the
+    criterion always scores the thing calibrate.py will later see, not a stage of it.
+
+    Throttling: recomputed on iterations 1, 1+period, 1+2*period, ...; in between the
+    cached value is returned.  A repeated value is never an improvement for
+    lgb.early_stopping, so patience keeps its old meaning (iterations without
+    improvement) and only the grid of candidate stopping points becomes coarser.
+    """
+    state = {"n": 0, "last": None}
+
+    def feval(preds, eval_data):
+        if state["n"] % period == 0:
+            t = time.time()
+            v, _ = cal_rmsle_2fold(to_log1p(np.asarray(preds, dtype=np.float64)),
+                                   ly, y_raw, half, bins)
+            stats.append(time.time() - t)
+            state["last"] = float(v)
+        state["n"] += 1
+        return "cal_rmsle", state["last"], False
+
+    return feval
+
+
+def fit_lgb(X, y, w, Xv, yv, params, objective, seed, feval=None):
     import lightgbm as lgb
     p = dict(
         objective="regression", metric="rmse", learning_rate=0.04,
@@ -54,14 +145,23 @@ def fit_lgb(X, y, w, Xv, yv, params, objective, seed):
     dtr = lgb.Dataset(X, y, weight=w, free_raw_data=True)
     if Xv is not None:
         dv = lgb.Dataset(Xv, yv, reference=dtr, free_raw_data=True)
-        m = lgb.train(p, dtr, num_boost_round=n_iter, valid_sets=[dv],
-                      callbacks=[lgb.early_stopping(200, verbose=False), lgb.log_evaluation(500)])
+        if feval is None:
+            m = lgb.train(p, dtr, num_boost_round=n_iter, valid_sets=[dv],
+                          callbacks=[lgb.early_stopping(200, verbose=False), lgb.log_evaluation(500)])
+        else:
+            # only the custom metric may drive early stopping: lgb.early_stopping
+            # stops on whichever metric runs out of patience first, so the built-in
+            # one has to go away entirely.
+            p["metric"] = "None"
+            m = lgb.train(p, dtr, num_boost_round=n_iter, valid_sets=[dv], feval=feval,
+                          callbacks=[lgb.early_stopping(200, verbose=False), lgb.log_evaluation(500)])
         return m, m.best_iteration
     m = lgb.train(p, dtr, num_boost_round=n_iter)
     return m, n_iter
 
 
-def fit_xgb(X, y, w, Xv, yv, params, objective, seed):
+def fit_xgb(X, y, w, Xv, yv, params, objective, seed, feval=None):
+    assert feval is None, "--es-metric cal is implemented for --model lgb only"
     import xgboost as xgb
     p = dict(
         objective="reg:squarederror", eval_metric="rmse", learning_rate=0.04,
@@ -83,7 +183,8 @@ def fit_xgb(X, y, w, Xv, yv, params, objective, seed):
     return m, n_iter
 
 
-def fit_cb(X, y, w, Xv, yv, params, objective, seed):
+def fit_cb(X, y, w, Xv, yv, params, objective, seed, feval=None):
+    assert feval is None, "--es-metric cal is implemented for --model lgb only"
     from catboost import CatBoostRegressor, Pool
     p = dict(
         loss_function="RMSE", learning_rate=0.06, depth=8, l2_leaf_reg=6.0,
@@ -125,6 +226,11 @@ def main():
     ap.add_argument("--active-only", action="store_true",
                     help="keep only train rows with activity in last 30d (matches test universe)")
     ap.add_argument("--weight-tau", type=float, default=0.0)
+    ap.add_argument("--reweight-recency", type=float, default=0.0, metavar="FLOOR",
+                    help="density-ratio row weights matching train recency to inference "
+                         "(O6, the soft version of --active-only); FLOOR is the smallest "
+                         "weight a row may get, e.g. 0.05. 0 disables. MEASURED: hurts "
+                         "(1.6894 control -> 1.6909), kept for the record.")
     ap.add_argument("--drop-cols", type=str, default="")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--threads", type=int, default=0)
@@ -135,8 +241,26 @@ def main():
                     help="log_mse only: train on log1p(y) minus per-anchor mean; add back last-2-anchor mean level at predict")
     ap.add_argument("--gap-days", type=int, default=0,
                     help="exclude train anchors within GAP days before the val anchor (30 = no target-window overlap with val)")
+    ap.add_argument("--es-metric", choices=["raw", "cal"], default="raw",
+                    help="early-stopping criterion: raw = LightGBM's own val metric "
+                         "(default, keeps historical behaviour bit-for-bit), cal = the "
+                         "honest calibrated val RMSLE of the final forecast (lgb only)")
+    ap.add_argument("--es-bins", type=int, default=24,
+                    help="quantile bins of the --es-metric cal calibration "
+                         "(calibrate.py default is 24; keep them equal)")
+    ap.add_argument("--es-period", type=int, default=10,
+                    help="recompute the calibrated criterion every N boosting "
+                         "iterations (cached in between); patience stays measured in "
+                         "iterations, only the stopping grid gets coarser")
     ap.add_argument("--notes", type=str, default="")
     args = ap.parse_args()
+    es_cal = args.es_metric == "cal"
+    assert not es_cal or args.model == "lgb", "--es-metric cal is implemented for --model lgb only"
+    assert args.es_period >= 1, "--es-period must be >= 1"
+    # The stopping point is what a paired raw-vs-cal measurement needs to see, so it is
+    # printed by BOTH arms — but only when --es-metric is given explicitly, which keeps
+    # the stdout of every pre-existing command line byte-identical to before.
+    es_verbose = "--es-metric" in sys.argv
     global VAL_ANCHOR
     if args.val_anchor:
         VAL_ANCHOR = date.fromisoformat(args.val_anchor)
@@ -179,6 +303,13 @@ def main():
     X = tr.select(cols).to_numpy().astype(np.float32)
     y_raw = tr["target"].to_numpy().astype(np.float64)
     w = anchor_weights(tr_anchors, rows_per, args.weight_tau)
+    if args.reweight_recency:
+        rw = recency_weights(tr["rec_active"].to_numpy(), val["rec_active"].to_numpy(),
+                             args.reweight_recency)
+        print(f"reweight-recency: floor={args.reweight_recency}, "
+              f"вес спящих {rw[tr['rec_active'].to_numpy() > 29].mean() if (tr['rec_active'].to_numpy() > 29).any() else float('nan'):.3f}",
+              flush=True)
+        w = rw if w is None else w * rw
     del tr
     Xv = val.select(cols).to_numpy().astype(np.float32)
     yv_raw = val["target"].to_numpy().astype(np.float64)
@@ -186,6 +317,15 @@ def main():
     print(f"X {X.shape}, Xv {Xv.shape}, load {time.time()-t0:.0f}s", flush=True)
 
     fitter = FITTERS[args.model]
+
+    # Calibrated criterion: prepared once, and ONLY when asked for.  default_rng(0)
+    # is its own stream, so the raw path draws exactly what it always drew.
+    cal_secs, es_ly, es_half = [], None, None
+    if es_cal:
+        es_ly = np.log1p(np.clip(yv_raw, 0, None))
+        es_half = np.random.default_rng(0).permutation(len(yv_raw)) < len(yv_raw) // 2
+        print(f"es_metric=cal: bins={args.es_bins} period={args.es_period} "
+              f"halves {int(es_half.sum())}/{int((~es_half).sum())}", flush=True)
 
     if args.objective == "two_stage":
         # stage 1: P(target>0) ; stage 2: E[log1p|>0]; pred_log = p * m2
@@ -196,14 +336,31 @@ def main():
             p1 = dict(objective="binary:logistic", eval_metric="auc"); p1.update(params)
         else:
             p1 = dict(loss_function="Logloss"); p1.update(params)
+        # Stage 1 keeps its own criterion (AUC) even under --es-metric cal, on purpose:
+        # when it trains there is no stage 2 yet, so the FINAL forecast does not exist;
+        # and AUC is a pure RANKING metric, so it is immune to the defect being fixed
+        # here (the defect is that a raw metric spends the stopping decision on the
+        # LEVEL, and AUC ignores level entirely).  The level of a two_stage model lives
+        # in stage 2 (E[log1p|y>0]) — that is where the calibrated criterion is applied,
+        # and it is applied to p_1 * mu, the whole forecast, not to mu alone.
         m1, it1 = fitter(X, ybin, w, Xv, (yv_raw > 0).astype(np.float64), p1, "log_mse", args.seed)
         pos = y_raw > 0
         ylog_pos = np.log1p(y_raw[pos])
         wpos = w[pos] if w is not None else None
-        m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv[yv_raw > 0], np.log1p(yv_raw[yv_raw > 0]), params2, "log_mse", args.seed + 1)
         p_val = predict(args.model, m1, Xv)
         if args.model == "cb":
             p_val = 1.0 / (1.0 + np.exp(-p_val))
+        if es_cal:
+            # stage 2 is validated on ALL val rows (not just the positives) so that the
+            # criterion sees exactly the forecast calibrate.py will see later.  Only the
+            # metric changes; stage 2 is still TRAINED on positives alone.
+            fev = make_cal_feval(
+                lambda mu, p=p_val: np.clip(p * np.clip(mu, 0, None), 0, None),
+                es_ly, yv_raw, es_half, args.es_bins, args.es_period, cal_secs)
+            m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv, np.log1p(yv_raw), params2,
+                             "log_mse", args.seed + 1, fev)
+        else:
+            m2, it2 = fitter(X[pos], ylog_pos, wpos, Xv[yv_raw > 0], np.log1p(yv_raw[yv_raw > 0]), params2, "log_mse", args.seed + 1)
         mu_val = predict(args.model, m2, Xv)
         pv = np.expm1(np.clip(p_val * np.clip(mu_val, 0, None), 0, None))
     else:
@@ -223,7 +380,17 @@ def main():
                 print(f"detrend: anchor means {[round(means[a],3) for a in tr_anchors]}, m_hat={m_hat:.4f}", flush=True)
         else:
             y = y_raw; yv = yv_raw
-        m, best_it = fitter(X, y, w, Xv, yv, params, args.objective, args.seed)
+        if es_cal:
+            # single-stage: the booster's own val output IS the forecast, up to the
+            # same transform applied below (log_mse predicts log1p GMV, everything
+            # else predicts GMV directly).
+            to_lp = ((lambda r, mh=m_hat: np.clip(r + mh, 0, None)) if args.objective == "log_mse"
+                     else (lambda r: np.log1p(np.clip(r, 0, None))))
+            fev = make_cal_feval(to_lp, es_ly, yv_raw, es_half, args.es_bins,
+                                 args.es_period, cal_secs)
+            m, best_it = fitter(X, y, w, Xv, yv, params, args.objective, args.seed, fev)
+        else:
+            m, best_it = fitter(X, y, w, Xv, yv, params, args.objective, args.seed)
         raw_pv = predict(args.model, m, Xv)
         if args.objective == "log_mse":
             pv = np.expm1(np.clip(raw_pv + m_hat, 0, None))
@@ -231,6 +398,20 @@ def main():
             pv = np.clip(raw_pv, 0, None)
 
     score = rmsle(yv_raw, pv)
+    if es_verbose:
+        stop = (f"stage1 {it1} stage2 {it2}" if args.objective == "two_stage"
+                else f"{best_it}")
+        cal_now, cal_hold = cal_rmsle_2fold(
+            np.log1p(np.clip(pv, 0, None)), es_ly if es_ly is not None
+            else np.log1p(np.clip(yv_raw, 0, None)), yv_raw,
+            es_half if es_half is not None
+            else np.random.default_rng(0).permutation(len(yv_raw)) < len(yv_raw) // 2,
+            args.es_bins)
+        print(f"es_metric={args.es_metric}: stop_iter {stop}; "
+              f"val raw {score:.6f} CAL {cal_now:.6f} (holdout {cal_hold:.6f})"
+              + (f"; {len(cal_secs)} calibrations, {sum(cal_secs):.1f}s total, "
+                 f"{np.mean(cal_secs) if cal_secs else 0:.3f}s each "
+                 f"(period {args.es_period})" if es_cal else ""), flush=True)
     save_preds(args.name, "val", uid_val, pv)
     log_score(args.name, score, args.notes or f"{args.model}/{args.objective}")
 
@@ -330,6 +511,8 @@ def main():
     save_meta(args.name, kind="gbdt", model=args.model, objective=args.objective,
               feature_cols=cols, params=params, params2=params2 if two else None,
               seed=args.seed, gap_days=args.gap_days, detrend=bool(args.detrend),
+              **({"es_metric": "cal", "es_bins": args.es_bins,
+                  "es_period": args.es_period} if es_cal else {}),
               m_hat_test=float(m_hat_test), active_only=bool(args.active_only),
               weight_tau=args.weight_tau, n_anchors=len(tr_anchors),
               val_rmsle=float(score),

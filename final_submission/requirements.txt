@@ -47,6 +47,10 @@ autograd==1.9.1                 # MIT
 dill==0.4.1                     # BSD-3-Clause
 
 # --- вспомогательные (калибровка, метрики, прогресс) ---
+# ВНИМАНИЕ: scikit-learn и lightgbm нужны НЕ ТОЛЬКО для обучения. Шаг 6 решения
+# (поправка на молчащих) строит модель молчания из LogisticRegression + LightGBM
+# прямо на стадии инференса, если её результат не закэширован в
+# models/silence_p_test.npz. Убрать их из окружения нельзя.
 scipy==1.15.3                   # BSD-3-Clause
 scikit-learn==1.7.2             # BSD-3-Clause
 joblib==1.5.3                   # BSD-3-Clause

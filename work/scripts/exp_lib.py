@@ -10,7 +10,10 @@ Predictions are raw GMV scale (>=0), NOT log.
 """
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ImportError:      # Windows: нет flock, трек 5 упирался в это
+    fcntl = None
 import sys
 from datetime import date
 from pathlib import Path
@@ -60,7 +63,9 @@ def save_preds(name: str, split: str, user_ids: np.ndarray, preds: np.ndarray):
 def log_score(name: str, val_rmsle: float, notes: str = ""):
     path = REPORTS_DIR / "scores.tsv"
     with open(path, "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX)
         f.write(f"{name}\t{val_rmsle:.6f}\t{notes}\n")
-        fcntl.flock(f, fcntl.LOCK_UN)
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_UN)
     print(f"[SCORE] {name}: {val_rmsle:.6f} ({notes})", flush=True)
