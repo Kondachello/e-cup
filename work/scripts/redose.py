@@ -131,7 +131,8 @@ def main():
         us, _ = read_sub(smp)
         if not np.array_equal(np.sort(us), np.sort(uid_b)):
             raise SystemExit("user_id не совпадает с sample_submit")
-    out = pl.DataFrame({"user_id": uid_b.astype(np.int64), "target": new})
+    # имя колонки — как во всех сабмитах и в sample_submit: predict, не target
+    out = pl.DataFrame({"user_id": uid_b.astype(np.int64), "predict": new})
     out.write_csv(a.out)
     lpn = np.log1p(new)
     print(f"\nзаписано {a.out}: {out.height} строк, отрицательных 0, NaN 0")
