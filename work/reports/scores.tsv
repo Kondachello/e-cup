@@ -583,3 +583,18 @@ m2s_gbdt_on2	2.485302	lgb/two_stage; m2bce
 c_ts2_s42_m2b	2.443568	lgb/two_stage; m2bce
 mlpziln_m2b	2.377007	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[4, 1, 6]; m2bce
 mlpziln_ctl	1.677806	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 4, 7]
+mlp2_big_m2b	2.384610	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[4, 1, 5]; m2bce
+mlp2_big_ctl	1.680857	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[3, 2, 7]
+c_ts2_s42_m2b_cal	1.729120	binned log-shift calibration of c_ts2_s42_m2b; holdout 2.444111->1.731524
+mlpziln_m2b_cal	1.737977	binned log-shift calibration of mlpziln_m2b; holdout 2.377131->1.740378
+mlpziln_ctl_cal	1.668739	binned log-shift calibration of mlpziln_ctl; holdout 1.678165->1.669193
+mlp2_big_m2b_cal	1.741648	binned log-shift calibration of mlp2_big_m2b; holdout 2.384687->1.744027
+mlp2_big_ctl_cal	1.670576	binned log-shift calibration of mlp2_big_ctl; holdout 1.681283->1.671130
+c_ts2_s42_v11	1.692074	paired v11 cross-device catalog tier +10 feats vs recorded control c_ts2_s42_rt 1.696260 raw / 1.668328 cal; anchor-source disk pins the rt anchor set 2025-09-10..2025-12-10 + gap ..2026-01-07
+c_ts2_s42_v11_cal	1.668326	binned log-shift calibration of c_ts2_s42_v11; holdout 1.692466->1.668907
+c_ts2_s42_m2mu	1.696708	lgb/two_stage; m2bce-mu
+mlpziln_m2mu	1.676604	ziln-mlp 512,256 bce_w1.0 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[1, 4, 7]; m2bce-mu
+mlp2_big_m2mu	1.680448	hurdle-mlp 512,256 bce_w0.7 do0.15 lr0.001 bs8192 gap30 seeds=42,1337,7 14anch ep=[3, 2, 7]; m2bce-mu
+c_ts2_s42_m2mu_cal	1.668387	binned log-shift calibration of c_ts2_s42_m2mu; holdout 1.697096->1.668910
+mlpziln_m2mu_cal	1.668631	binned log-shift calibration of mlpziln_m2mu; holdout 1.676958->1.669080
+mlp2_big_m2mu_cal	1.670617	binned log-shift calibration of mlp2_big_m2mu; holdout 1.680869->1.671200
