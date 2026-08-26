@@ -7,8 +7,14 @@
   1. калиброванный скор — единственный сопоставимый с остальным зоопарком;
   2. ЗАПАС над блендом: по выведенному тождеству corr(ошибка бленда, ошибка модели)
      тождественно равна sb/sm, поэтому корреляция ошибок не несёт никакой своей
-     информации. Значение имеет только разность δ = sb/sm − ρ, а вклад в бленд
-     равен 7.1·δ². Модель с δ ≤ 0 не даёт ничего, каким бы ни был её скор;
+     информации. Значение имеет только разность δ = sb/sm − ρ (корреляция
+     НЕЦЕНТРИРОВАННАЯ — тождество выполняется для E[e·e_b]/(sm·sb), не для corrcoef).
+     Модель с δ ≤ 0 не даёт ничего, каким бы ни был её скор;
+  2а. ВКЛАД — точной алгеброй пары, а НЕ по формуле 7.1·δ². Формула похоронена
+     20–21.08: она откалибрована на слабых моделях (sm/sb≈1.06), объясняет 9%
+     разброса и занижает сильные модели в 3–20 раз — по ней браковалась kostya46,
+     крупнейший член бленда. Здесь используется та же функция, что в margin.py,
+     чтобы у проекта была ОДНА реализация приёмки;
   3. сравнение рук: small против big на одинаковых сидах и срезах. Это и есть
      ответ на вопрос, покупает ли ёмкость что-нибудь.
 
@@ -20,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -27,10 +34,14 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-ROOT = Path("/Users/alexanderkondakov/ozon-cup")
+# Корень репозитория: OZON_ROOT, иначе два уровня вверх от этого файла
+# (work/colab/ -> repo). Захардкоженный путь одной машины делал скрипт
+# неработающим у всех остальных, включая проверяющего на чистом клоне.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
 sys.path.insert(0, str(ROOT / "work" / "scripts"))
 from common import PREDS_DIR, VAL_ANCHOR, load_anchor, rmsle          # noqa: E402
 from calibrate import fit_shifts, apply_shifts                        # noqa: E402
+from margin import NOISE, THRESHOLD, pair_contribution                # noqa: E402
 
 OUT = ROOT / "work" / "colab" / "out"
 
@@ -84,10 +95,13 @@ def assess(name: str, verbose: bool = True) -> dict | None:
     if bl is not None:
         eb, em = bl - ly, lc - ly
         sb, sm = float(np.sqrt(np.mean(eb ** 2))), float(np.sqrt(np.mean(em ** 2)))
-        rho = float(np.corrcoef(eb, em)[0, 1])
+        # НЕцентрированная корреляция: тождество ЗАПАС = sb/sm − ρ выполняется для
+        # E[e·e_b]/(sm·sb). np.corrcoef центрирует обе ошибки и искажает результат у
+        # любой модели с ненулевым средним ошибки (Женя намерил: 6 из 30).
+        rho = float(np.mean(em * eb) / max(sm * sb, 1e-12))
         delta = sb / max(sm, 1e-12) - rho
         res |= {"sb": sb, "sm": sm, "rho": rho, "margin": delta,
-                "contribution": 7.1 * delta ** 2}
+                "contribution": pair_contribution(sb, sm, delta)}
 
     j = OUT / f"{name}.json"
     if j.exists():
@@ -103,10 +117,12 @@ def assess(name: str, verbose: bool = True) -> dict | None:
                   f"(расхождение {d_:.6f}{'  ВНИМАНИЕ' if d_ > 1e-4 else ''})")
         if "margin" in res:
             print(f"  бленд {res['sb']:.6f}, модель {res['sm']:.6f}, ρ {res['rho']:.5f}")
+            c = res["contribution"]
+            verdict = ("ВЫШЕ ПОРОГА" if c >= THRESHOLD else
+                       "слабо, но не шум" if c >= 2 * NOISE else "шум")
             print(f"  ЗАПАС δ = {res['margin']:+.5f}  ->  вклад в бленд "
-                  f"{res['contribution']:.6f}"
-                  + ("   (порог полезности 0.0003)" if res["contribution"] < 3e-4 else
-                     "   ВЫШЕ ПОРОГА"))
+                  f"{c:.6f}   {verdict} (порог {THRESHOLD}, шум {NOISE})")
+            print("  наборы кандидатов мерить joint_gain.py: запасы НЕ складываются")
     return res
 
 

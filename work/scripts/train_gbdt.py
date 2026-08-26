@@ -45,7 +45,18 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from calibrate import apply_shifts, fit_shifts
 from common import VAL_ANCHOR, TEST_ANCHOR, rmsle, load_anchor, feature_cols
-from exp_lib import available_train_anchors, load_matrix, save_preds, log_score
+from exp_lib import (available_train_anchors, load_matrix, note, protocol_train_anchors,
+                     save_preds, log_score)
+
+# Источник набора обучающих якорей. ЕДИНАЯ ТОЧКА: и обучение, и gap-фаза ретрейна
+# ходят сюда, и train_weak.py подменяет ИМЕННО ЭТУ функцию, когда обедняет модель по
+# срезам. Раньше подменялась available_train_anchors, и любая смена источника молча
+# ломала бы обеднение — теперь точка одна и подмена продолжает работать.
+_ANCHOR_SOURCE = "protocol"
+
+
+def anchor_pool():
+    return protocol_train_anchors(source=_ANCHOR_SOURCE)
 from model_io import booster_filename, save_booster, save_meta
 
 RETRAIN_ITER_MULT = 1.07
@@ -239,8 +250,18 @@ def main():
                     help="alternative validation anchor (e.g. 2025-12-31); implies --no-test")
     ap.add_argument("--detrend", action="store_true",
                     help="log_mse only: train on log1p(y) minus per-anchor mean; add back last-2-anchor mean level at predict")
-    ap.add_argument("--gap-days", type=int, default=0,
-                    help="exclude train anchors within GAP days before the val anchor (30 = no target-window overlap with val)")
+    ap.add_argument("--anchor-source", choices=["protocol", "disk"], default="protocol",
+                    help="откуда брать обучающие якоря: protocol — train_anchors(14), не "
+                         "зависит от каталога (умолчание); disk — историческое поведение, "
+                         "нужно для воспроизведения артефактов до 25.08")
+    ap.add_argument("--gap-days", type=int, default=30,
+                    help="exclude train anchors within GAP days before the val anchor "
+                         "(30 = no target-window overlap with val; ЭТО УМОЛЧАНИЕ). "
+                         "Было 0 — единственный трейнер проекта с небезопасным "
+                         "умолчанием при том, что правило №1 звучит «обучение только с "
+                         "зазором 30, иначе скор завышается на 0.05-0.10». Именно так "
+                         "зоопарк work/preds оказался отравлен pre-gap эпохой. "
+                         "0 задавать можно, но теперь только явно.")
     ap.add_argument("--es-metric", choices=["raw", "cal"], default="raw",
                     help="early-stopping criterion: raw = LightGBM's own val metric "
                          "(default, keeps historical behaviour bit-for-bit), cal = the "
@@ -254,6 +275,8 @@ def main():
                          "iterations, only the stopping grid gets coarser")
     ap.add_argument("--notes", type=str, default="")
     args = ap.parse_args()
+    global _ANCHOR_SOURCE
+    _ANCHOR_SOURCE = args.anchor_source
     es_cal = args.es_metric == "cal"
     assert not es_cal or args.model == "lgb", "--es-metric cal is implemented for --model lgb only"
     assert args.es_period >= 1, "--es-period must be >= 1"
@@ -274,13 +297,16 @@ def main():
     params2 = json.loads(args.params2)
 
     t0 = time.time()
-    tr_anchors = available_train_anchors()
+    tr_anchors = anchor_pool()
     if args.gap_days:
         from datetime import timedelta
         cutoff = VAL_ANCHOR - timedelta(days=args.gap_days)
         tr_anchors = [a for a in tr_anchors if a <= cutoff]
     if args.n_anchors:
         tr_anchors = tr_anchors[-args.n_anchors:]
+    print(f"gap_days={args.gap_days}"
+          + ("  ВНИМАНИЕ: зазор выключен явно, val-скор будет завышен" if not args.gap_days else ""),
+          flush=True)
     print(f"train anchors: {[a.isoformat() for a in tr_anchors]}", flush=True)
 
     val = load_anchor(VAL_ANCHOR)
@@ -289,6 +315,14 @@ def main():
         drop = set(args.drop_cols.split(","))
         cols = [c for c in cols if c not in drop]
     print(f"{len(cols)} features", flush=True)
+    # ЭФФЕКТИВНЫЕ параметры в отпечаток: умолчание --gap-days сменилось с 0 на 30,
+    # поэтому одна и та же архивная команда до и после обучает РАЗНОЕ, а argv этого
+    # не покажет — там только явно переданное.
+    note(anchor_source=args.anchor_source, train_anchors=[a.isoformat() for a in tr_anchors],
+         gap_days=args.gap_days, n_train_anchors=len(tr_anchors), n_features=len(cols),
+         model=args.model, objective=args.objective, seed=args.seed,
+         es_metric=args.es_metric, n_anchors_flag=args.n_anchors or None,
+         active_only=bool(args.active_only) or None)
 
     tr = load_matrix(tr_anchors, columns=["user_id", "anchor_date", "target"] + cols)
     if args.active_only:
@@ -422,7 +456,7 @@ def main():
     Xg, yg_raw, wg = None, None, None
     if args.gap_days:
         from datetime import timedelta
-        gap_anchors = [a for a in available_train_anchors()
+        gap_anchors = [a for a in anchor_pool()
                        if VAL_ANCHOR - timedelta(days=args.gap_days) < a < VAL_ANCHOR]
         if gap_anchors:
             import polars as pl
@@ -439,11 +473,12 @@ def main():
                 wg = np.concatenate(gaw)
             del gtr
             print(f"retrain adds gap anchors {[a.isoformat() for a in gap_anchors]}: +{len(yg_raw)} rows", flush=True)
-    valX = Xv
-    parts = [X] + ([Xg] if Xg is not None else []) + [valX]
+    parts = [X] + ([Xg] if Xg is not None else []) + [Xv]
     Xall = np.vstack(parts)
     row_ratio = Xall.shape[0] / max(X.shape[0], 1)
-    del X, Xv
+    # parts держал ссылки на X/Xg/Xv, поэтому прежний `del X, Xv` память не отдавал:
+    # копия жила до конца функции. На 16 ГБ это заметно (у проекта два OOM в истории).
+    del parts, X, Xv, Xg
     test = load_anchor(TEST_ANCHOR)
     Xt = test.select(cols).to_numpy().astype(np.float32)
     uid_t = test["user_id"].to_numpy()

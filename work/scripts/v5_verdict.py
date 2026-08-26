@@ -117,7 +117,10 @@ def main():
                 continue
             e = lp - ly
             sm = float(np.sqrt(np.mean(e ** 2)))
-            rho = float(np.corrcoef(e, eb)[0, 1])
+            # НЕцентрированная: тождество ЗАПАС = sb/sm - rho выполняется для
+            # E[e*eb]/(sm*sb). На калиброванных входах числа те же, но пусть все
+            # реализации запаса в проекте считают одинаково.
+            rho = float(np.mean(e * eb) / max(sm * sb, 1e-12))
             margin = sb / max(sm, 1e-12) - rho
             d = e - eb
             w = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))

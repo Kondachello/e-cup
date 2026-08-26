@@ -547,6 +547,13 @@ def main():
     ap.add_argument("--stage", default="eval", choices=["eval", "final"])
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--strength", type=float, default=0.9)
+    # то есть кладёт ВСЁ новое направление одной силой.
+    # и KNOWLEDGE прямо называет первое ошибкой: d_new = 0.839*mdl_tektit + e, поэтому
+    # «сила 0.9 на всё» даёт старой, ЗАМЕРЕННОЙ части 0.755 вместо оптимальных 0.929,
+    # а неуверенной новой — 0.9 вместо 0.65. Разложение делает final_submission/
+    # inference.py (шаг 6). Прежнее умолчание совпадало с именем канонического файла,
+    # то есть один перезапуск затирал эталон перед заморозкой финалистов.
+    ap.add_argument("--name", default="silence_candidate")
     args = ap.parse_args()
     if args.stage == "eval":
         stage_eval(args)

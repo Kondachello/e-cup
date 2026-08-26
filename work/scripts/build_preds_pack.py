@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import os
 import json
 import sys
 from pathlib import Path
@@ -36,7 +37,11 @@ from common import PREDS_DIR, REPORTS_DIR, VAL_ANCHOR, load_anchor, rmsle
 
 EXTERNAL: dict[str, Path] = {}
 
-OUT = Path("/Users/alexanderkondakov/ozon-cup/work/preds_pack")
+# Корень репозитория: OZON_ROOT, иначе поднимаемся от этого файла.
+# Захардкоженный путь одной машины делал скрипт неработающим у всех
+# остальных членов команды и на чистом клоне.
+ROOT_ = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
+OUT = ROOT_ / "work" / "preds_pack"
 # обучены до введения зазора 30 дней: валидационный скор завышен, в пул нельзя
 OLD_ERA = {"lgblog_final", "xgblog_final", "mlp_final", "gru_final"}
 EXCL = ("smoke", "probe", "cand", "applied", "hjit", "path")
@@ -44,8 +49,7 @@ EXCL = ("smoke", "probe", "cand", "applied", "hjit", "path")
 EXTRA = ["febspec_cal", "short14_cal", "channel2_cal", "mlpbin_cal", "mlpziln_cal",
          "fusion_v3c_avg_cal", "fusion_v3_avg_cal", "c_ts2_avg_cal", "wklin_base_cal"]
 # предсказания, лежащие вне work/preds: ветки сокомандников и GPU-трек
-EXTRA_DIRS = [Path("/Users/alexanderkondakov/ozon-cup/work_kostya/preds"),
-              Path("/Users/alexanderkondakov/ozon-cup/work/colab/out")]
+EXTRA_DIRS = [ROOT_ / "work_kostya" / "preds", ROOT_ / "work" / "colab" / "out"]
 
 
 def blend_members() -> dict[str, float]:

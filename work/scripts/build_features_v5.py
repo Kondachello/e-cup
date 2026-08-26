@@ -93,7 +93,7 @@ import polars as pl  # noqa: E402
 sys.path.insert(0, str(Path(__file__).parent))
 from common import (  # noqa: E402
     FEATURES_DIR, REPORTS_DIR, TEST_ANCHOR, TRAIN_PARQUET, VAL_ANCHOR,
-    V5_MAX_COMPS, v5_cols, user_universe,
+    V5_MAX_COMPS, train_anchors, v5_cols, user_universe,
 )
 from exp_lib import available_train_anchors  # noqa: E402
 
@@ -118,9 +118,94 @@ def free_gb() -> float:
 
 
 # ------------------------------------------------------------------ anchor plan
-def anchor_plan() -> dict:
-    """The exact anchors the champion protocol touches, split by role."""
+def on_val_week_grid(a: date) -> bool:
+    """Стоит ли якорь на 7-дневной сетке валидационного якоря."""
+    return (VAL_ANCHOR - a).days % 7 == 0
+
+
+def anchor_plan(strict_grid: bool = True, source: str = "protocol") -> dict:
+    """The exact anchors the champion protocol touches, split by role.
+
+    ИСТОЧНИК НАБОРА — ПРОТОКОЛ, А НЕ СОДЕРЖИМОЕ КАТАЛОГА (изменено 24.08).
+
+    Было: fit = `[a for a in available_train_anchors() if a <= cutoff][-14:]`, то есть
+    ПОСЛЕДНИЕ 14 файлов с диска. У этого правила скверное свойство: добавление якоря не
+    добавляет данных, а ВЫТЕСНЯЕТ старый новым и сжимает окно обучения. Замерено на
+    ветке `_wk` (она считается только по недельным колонкам train.parquet, поэтому её
+    можно пересчитать для любого набора без сборки признаков):
+
+        каталог шага 14 (build_features --preset all)  fit 12, 2025-07-02..12-03, 154 дня
+                                                        -> _wk 1.736788, alpha 3162.28
+        каталог шага  7 (~31 файл, машина №1)          fit 14, 2025-09-10..12-10,  91 день
+                                                        -> _wk 1.731511, alpha 10000
+
+    Второе — ровно записанное значение канонического wklin_wk, совпадение до 1e-7 на
+    переборе 60 наборов; контроль той же реплики воспроизводит сегодняшний прогон
+    (1.736788) до 2e-7. То есть вся история «wklin не воспроизводится» объясняется
+    плотностью каталога, а восемь отвергнутых гипотез её не проверяли, потому что все
+    меняли количество якорей ОДНОЙ сетки.
+
+    Теперь набор задаётся протоколом: `train_anchors(N_TRAIN_ANCHORS)` — та же сетка,
+    что строит `build_features.py --preset all`, — и делится по cutoff. Результат не
+    зависит от того, что ещё лежит в каталоге. Недостающие файлы называются по имени,
+    а не подменяются молча ближайшими.
+
+    `source="disk"` возвращает историческое поведение: нужно, чтобы воспроизвести
+    артефакты, собранные до 24.08 (в том числе отгружаемый wklin, вес 0.071). Считать
+    на нём что-то новое не надо.
+
+    СЕТКА. Всё, что кормится из общей недельной матрицы (`weekly_dense(VAL_ANCHOR)` +
+    `joint_block(G, off)`), опирается на то, что каждый якорь отстоит от VAL на целое
+    число недель: тогда `off = (VAL - a).days // 7` даёт блок, чей самый свежий день
+    РАВЕН якорю. Раньше это было записано комментарием и ничем не проверялось.
+
+    ЭКСПОЗИЦИЯ СЕЙЧАС НУЛЕВАЯ, и это надо читать именно так. На каноническом наборе
+    train_anchors(14) остаток от деления на 7 везде 0 — off-grid якорей НЕТ, ни один
+    отгружаемый артефакт этим не задет. Три якоря с остатком 2 (2025-12-22, 2025-12-29,
+    2026-01-05) были экспериментом с цензурированными якорями от 20.08, эксперимент
+    закрыт как мёртвый, якоря убраны с диска 23.08. Это защита от повторения, а не
+    починка случившегося.
+
+    ЧТО БЫЛО БЫ, окажись такой якорь на диске в момент сборки. Для 2025-12-22
+    (понедельник, 23 дня до VAL) off = 3, а неделя 3 покрывает 18–24.12 — в признаки
+    якоря попали бы 23 и 24 декабря, ПОСЛЕ него и внутри его целевого окна. Масштаб
+    такого попадания, посчитанный по train.parquet: активность в этих двух днях есть
+    у 136 672 юзеров (54.7%) на 2.02 млн GMV. Это верхняя оценка того, что зашло бы в
+    один блок из 36 недель, а не измеренный ущерб.
+
+    ПОЧЕМУ ЭТО НЕ ЛОВИТСЯ ОБЫЧНОЙ СВЕРКОЙ. Off-grid якорь при cutoff = VAL−30 всегда
+    попадает в gap, а не в fit, поэтому val-скор к нему иммунен по построению. Но
+    тестовая сторона train_wklin пулит fit + gap + VAL, то есть gap уезжает ровно в ту
+    половину, которая идёт в сабмит. Сверка «val совпал до шестого знака» такой дефект
+    пропускает; ловит его только отпечаток набора якорей (provenance, anchors_on_disk).
+
+    Поэтому off-grid якоря из плана исключаются, громко и по имени. `strict_grid=False`
+    оставлен для диагностики — считать на нём что-либо для сдачи нельзя.
+    """
     avail = available_train_anchors()
+    if source == "protocol":
+        grid = train_anchors(N_TRAIN_ANCHORS)
+        missing = [a for a in grid if a not in set(avail)]
+        if missing:
+            raise FileNotFoundError(
+                "нет файлов признаков для якорей протокола: "
+                + ", ".join(a.isoformat() for a in missing)
+                + f"\n  собрать: build_features.py --anchors "
+                + ",".join(a.isoformat() for a in missing))
+        avail = grid
+    elif source == "disk":
+        log("ВНИМАНИЕ: source='disk' — набор берётся как ПОСЛЕДНИЕ "
+            f"{N_TRAIN_ANCHORS} файлов каталога и зависит от того, что в нём лежит. "
+            "Режим оставлен только для воспроизведения артефактов до 24.08.")
+    else:
+        raise ValueError(f"source должен быть 'protocol' или 'disk', не {source!r}")
+    if strict_grid:
+        off_grid = [a for a in avail if not on_val_week_grid(a)]
+        if off_grid:
+            log("ВНИМАНИЕ: якоря вне 7-дневной сетки VAL исключены из плана "
+                "(их недельный блок захватывал бы дни ПОСЛЕ якоря): "
+                + ", ".join(f"{a} (+{(VAL_ANCHOR - a).days % 7}д)" for a in off_grid))
+        avail = [a for a in avail if on_val_week_grid(a)]
     cutoff = VAL_ANCHOR - timedelta(days=GAP_DAYS)
     return {"fit": [a for a in avail if a <= cutoff][-N_TRAIN_ANCHORS:],
             "gap": [a for a in avail if cutoff < a < VAL_ANCHOR],

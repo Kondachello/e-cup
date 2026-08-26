@@ -140,7 +140,9 @@ def main():
         lv_avg = np.mean([LV[i] for i in sel], axis=0)
         e_avg = lv_avg - ly_
         sm = float(np.sqrt(np.mean(e_avg ** 2)))
-        rho = float(np.corrcoef(e_avg, eb)[0, 1])
+        # НЕцентрированная, как в margin.py/err_corr.py: усреднение калиброванных
+        # прогнозов не обязано давать нулевое среднее ошибки.
+        rho = float(np.mean(e_avg * eb) / max(sm * sb, 1e-12))
         d = e_avg - eb
         w2 = float(-np.dot(eb, d) / max(np.dot(d, d), 1e-12))
         g = sb - float(np.sqrt(np.mean(((1 - w2) * lb + w2 * lv_avg - ly_) ** 2)))

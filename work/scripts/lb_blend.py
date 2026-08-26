@@ -9,13 +9,17 @@ Math (log1p space, per-user errors a=lpA-ly, b=lpB-ly on the public subset):
 """
 from __future__ import annotations
 
+import os
 import argparse
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 
-ROOT = Path("/Users/alexanderkondakov/ozon-cup")
+# Корень репозитория: OZON_ROOT, иначе поднимаемся от этого файла.
+# Захардкоженный путь одной машины делал скрипт неработающим у всех
+# остальных членов команды и на чистом клоне.
+ROOT = Path(os.environ.get("OZON_ROOT", str(Path(__file__).resolve().parents[2])))
 
 
 def load(p):

@@ -76,7 +76,8 @@ from common import (  # noqa: E402
     FEATURES_DIR, REPORTS_DIR, TEST_ANCHOR, VAL_ANCHOR, feature_cols, load_anchor, rmsle,
 )
 from build_features_v5 import W_WEEKS, anchor_plan, joint_block, weekly_dense  # noqa: E402
-from exp_lib import log_score, save_preds  # noqa: E402
+from exp_lib import log_score, note, save_preds  # noqa: E402
+from model_io import save_npz  # noqa: E402
 
 ALPHAS = [10.0 ** (k / 2) for k in range(-4, 15)]   # 0.01 .. 3.2e6, half-decade steps
 CHUNK = 50_000
@@ -150,11 +151,17 @@ def main():
     ap.add_argument("--emit-tier", action="store_true")
     ap.add_argument("--n-anchors", type=int, default=0, help="mechanics check: fewer fit anchors")
     ap.add_argument("--no-test", action="store_true")
+    ap.add_argument("--anchor-source", choices=("protocol", "disk"), default="protocol",
+                    help="откуда берётся набор якорей. protocol (умолчание) — из "
+                         "train_anchors(N), не зависит от содержимого каталога. disk — "
+                         "прежнее поведение «последние 14 файлов каталога»; нужно ровно "
+                         "для воспроизведения артефактов до 24.08 (отгружаемый wklin "
+                         "собран на каталоге шага 7, набор 2025-09-10..2025-12-10)")
     ap.add_argument("--notes", default="")
     args = ap.parse_args()
 
     t0 = time.time()
-    plan = anchor_plan()
+    plan = anchor_plan(source=args.anchor_source)
     fit_a, gap_a = plan["fit"], plan["gap"]
     if args.n_anchors:
         fit_a = fit_a[-args.n_anchors:]
@@ -166,17 +173,36 @@ def main():
     v0 = load_anchor(VAL_ANCHOR)
     base_cols = [c for c in feature_cols(v0) if not c.startswith("v5")]
     uid = v0["user_id"].to_numpy()
-    assert (np.diff(uid) > 0).all() or True
     order = np.argsort(uid)
     uid = uid[order]
+    assert (np.diff(uid) > 0).all(), "user_id валидационного якоря не строго возрастает"
     n_wk, n_base = 5 * W_WEEKS, len(base_cols)
     p = n_wk + n_base
     WK = np.arange(n_wk)
     BS = np.arange(n_wk, p)
     log(f"design: {n_wk} weekly + {n_base} base = {p} columns")
+    # Набор якорей — доказанно решающая переменная воспроизведения этой модели
+    # (сверка 23.08), поэтому он идёт в отпечаток явно, а не только как каталог.
+    note(n_fit_anchors=len(fit_a), n_gap_anchors=len(gap_a), n_features=p,
+         n_base_features=n_base, weeks=W_WEEKS,
+         fit_anchors=[a.isoformat() for a in fit_a],
+         gap_anchors=[a.isoformat() for a in gap_a])
     del v0
 
     grid_anchors = fit_a + gap_a + [VAL_ANCHOR]
+    # Второй рубеж к фильтру в anchor_plan: joint_block(Gv, off) даёт блок, чей самый
+    # свежий день равен якорю, ТОЛЬКО если якорь отстоит от VAL на целое число недель.
+    # Иначе в признаки якоря попадают дни ПОСЛЕ него — то есть начало его же целевого
+    # окна. На каноническом наборе таких якорей нет и никогда не было в отгружаемых
+    # артефактах; это страховка от повторения эксперимента 20.08 с цензурированными
+    # якорями. Молчать всё же нельзя: val-скор такую утечку не показывает (off-grid
+    # якорь при cutoff = VAL-30 всегда попадает в gap), а тестовая сторона ниже пулит
+    # fit + gap + VAL, то есть gap уезжает в сабмит.
+    bad_grid = [a for a in grid_anchors if (VAL_ANCHOR - a).days % 7]
+    assert not bad_grid, (
+        "якоря вне 7-дневной сетки VAL: "
+        + ", ".join(f"{a} (+{(VAL_ANCHOR - a).days % 7}д)" for a in bad_grid)
+        + " — их недельный блок захватил бы дни после якоря")
     max_off = max((VAL_ANCHOR - a).days // 7 for a in grid_anchors)
     Gv = weekly_dense(VAL_ANCHOR, max_off + W_WEEKS, uid)
     off = {a: (VAL_ANCHOR - a).days // 7 for a in grid_anchors}
@@ -244,6 +270,17 @@ def main():
         betas[tag] = b
         lp = np.clip(Xv @ b[:-1] + b[-1], 0, None)
         name = args.name + tag
+        # Воспроизводимость: модель — это ровно вектор [beta, intercept] в сыром
+        # пространстве, поэтому сохранить её стоит килобайт. Без этого *_val.parquet
+        # не восстановить из чистого клона (inference.py --stage check: «прогноз-артефакт»).
+        # Сохраняем не только индексы колонок, но и их ИМЕНА и набор якорей: без
+        # этого артефакт не самоописывающий — применить beta на другом наборе
+        # признаков нельзя, а именно набор и плавает между машинами (196 против 203).
+        save_npz(f"{name}_val", beta=b, cols=np.array(cols, dtype=np.int64),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64),
+                 base_cols=np.array(base_cols, dtype=object),
+                 n_weekly=np.int64(n_wk), weeks=np.int64(W_WEEKS),
+                 fit_anchors=np.array([a.isoformat() for a in fit_a]))
         save_preds(name, "val", uid, np.expm1(lp))
         s = rmsle(yv_raw, np.expm1(lp))
         res[name] = {"val_rmsle": round(s, 6), "alpha": best_alpha[tag],
@@ -271,6 +308,12 @@ def main():
     for tag, cols in sets.items():
         b = solve(acc_full.A, acc_full.g, acc_full.n, cols, best_alpha[tag])
         lp = np.clip(Xt @ b[:-1] + b[-1], 0, None)
+        # те же коэффициенты, что делают отгружаемый *_test.parquet
+        save_npz(f"{args.name + tag}_test", beta=b, cols=np.array(cols, dtype=np.int64),
+                 alpha=np.array([best_alpha[tag]], dtype=np.float64),
+                 base_cols=np.array(base_cols, dtype=object),
+                 n_weekly=np.int64(n_wk), weeks=np.int64(W_WEEKS),
+                 fit_anchors=np.array([a.isoformat() for a in (fit_a + gap_a + [VAL_ANCHOR])]))
         save_preds(args.name + tag, "test", uid, np.expm1(lp))
         res[args.name + tag]["test_mean_logpred"] = round(float(lp.mean()), 4)
 
