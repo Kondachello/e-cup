@@ -602,3 +602,5 @@ dart_tw_full	1.691199	lgb/log_mse
 dart_tw_full_cal	1.669952	binned log-shift calibration of dart_tw_full; holdout 1.691314->1.670287
 bagged_champ8	1.689218	bagged n=8 pool=24 gap30 it=[266, 243, 73, 76, 75, 286, 192, 312]
 bagged_champ8_cal	1.670196	binned log-shift calibration of bagged_champ8; holdout 1.689435->1.670565
+c_ts2_s42	1.692342	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io
+behavonly	1.712425	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io

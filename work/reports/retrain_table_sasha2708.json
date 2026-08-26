@@ -1,0 +1,28 @@
+{
+ "blend_ref": 1.6656470175318332,
+ "coverage": 0.035846,
+ "blend_after_all": 1.6656470175318332,
+ "d_blend_total": 0.0,
+ "rows": [
+  {
+   "member": "c_ts2_s42",
+   "retrain": "c_ts2_s42_rt",
+   "weight": 0.0,
+   "shipped": 1.6931383112477816,
+   "retrained": 1.692342256151643,
+   "d_solo": -0.0007960550961385593,
+   "rms_log": 0.05074885209161751,
+   "d_blend": 0.0
+  },
+  {
+   "member": "behavonly",
+   "retrain": "behavonly_rt",
+   "weight": 0.035846,
+   "shipped": 1.7124247987821615,
+   "retrained": 1.7124247987821615,
+   "d_solo": 0.0,
+   "rms_log": 0.0,
+   "d_blend": 0.0
+  }
+ ]
+}

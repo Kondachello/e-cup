@@ -71,9 +71,16 @@ subprocess.run([sys.executable, "kaggle_seq.py", "build", "--gap", "35"], check=
 ## Ячейка 3 — оба сида параллельно (Popen: `!cmd &` на Kaggle запрещён)
 
 Арх. флаги сессии-источника подтягиваются автоматически из `<имя>.json` рядом с
-чекпойнтом (сейчас это чистый v1: d=256/layers=6/heads=8/ff=512/lmax=320 —
-дефолты, флаги не нужны; автоподтяжка — страховка от дрейфа). Фолбэк: чекпойнт
-не найден или `WARM=False` → тот же запуск с нуля (lr 3e-4 вместо 2e-4).
+чекпойнтом (автоподтяжка — страховка от дрейфа). ВАЖНО, 27.08: v1-чекпойнты
+`kevf_s42/kevf_s1337` УТРАЧЕНЫ — их нет ни в Kaggle Output'ах, ни в локальных
+архивах, ни в git (проверено полным поиском; kevf_s1337 существует только в
+спеке). Тёплые базы теперь — чекпойнты сессии 2 из пакета `ozon_kevf_ckpt.zip`
+(корень репо, 165 МБ): `kevf_v2.ckpt` (tfm + v2-флаги, кривая ~1.674) и
+`kevf_gru.ckpt` (encoder=gru, кривая ~1.670); их json лежат рядом, arch_flags
+ниже пробрасывает и `--encoder`. Для новой базы замените в launch() строку
+`ck = find1(f"kevf_s{seed}.ckpt")` на явную базу (`find1("kevf_v2.ckpt")`).
+Фолбэк: чекпойнт не найден или `WARM=False` → тот же запуск с нуля (lr 3e-4
+вместо 2e-4).
 
 ```python
 import glob, json, os, subprocess, sys
@@ -100,6 +107,8 @@ def arch_flags(ck):
     cfg, v2, fl = meta.get("cfg", {}), meta.get("v2", {}), []
     for k in ("d", "layers", "heads", "ff", "lmax"):
         if k in cfg: fl += [f"--{k}", str(cfg[k])]
+    if cfg.get("encoder") and cfg["encoder"] != "tfm":
+        fl += ["--encoder", cfg["encoder"]]   # kevf_gru: без этого тензоры не совпадут
     if v2.get("time_bias"): fl += ["--time-bias", str(v2["time_bias"])]   # формы!
     if v2.get("time2vec"):  fl += ["--time2vec", str(v2["time2vec"])]
     if v2.get("aux_dt"):    fl += ["--aux-dt", str(v2["aux_dt"])]
