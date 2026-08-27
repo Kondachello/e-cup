@@ -143,6 +143,7 @@ MEASURED: list[tuple[str, str, float]] = [
     
     
     
+    # Расчёт 1.6465664, факт в 2.7e-6. E[private] ≈ +0.00045 к T3-цепочке.
 
 ]
 
