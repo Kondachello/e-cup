@@ -127,6 +127,10 @@ MEASURED: list[tuple[str, str, float]] = [
     # SHOW8 — новый лучший паблик. НЕ ФИНАЛИСТЫ.
     ("SHOW5_hull",       "SHOW5_hull.csv",                 1.645268446505165),
     ("SHOW8_hull3a",     "SHOW8_hull3a.csv",               1.6447341128),
+    # F1_priv — финалист-кандидат по приватной EV (f1_priv_assembly.md): R8 +
+    #Расчёт 1.6467570,
+    # факт −0.44σ. E[private] ≈ +0.00032 к T3-цепочке.
+    ("F1_priv",          "F1_priv.csv",                    1.6467037592),
 
 ]
 
