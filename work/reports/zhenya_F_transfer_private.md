@@ -1,5 +1,8 @@
 # Часть F: приватная теория переноса и доза финала
 
+Финальный s\* для
+> R9 доведён до **0.75** под подпись. См. [Часть G](zhenya_G_final_signed.md).
+
 Женя, 27.08.2026. Скрипты: `work/zhenya_eda/scripts/n1_prior.py`, `n2_curse.py`,
 `n3_sim.py`, `n4_curse_exact.py`, `n5_final.py`. Всё локально, LB не трогался.
 
