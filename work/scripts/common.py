@@ -51,6 +51,15 @@ V10_DROP = {"v10_s2o_90", "v10_c2o_90"}
 V10_FEATS = [f for f in ([f"v10_{b}_{w}" for w in V10_WINDOWS for b in V10_PER_WIN]
                          + [f"v10_tr_{b}" for b in V10_TRENDS]) if f not in V10_DROP]
 
+# v11 tier = non-synchronous catalog attribution, i.e. cross-device days with
+# gmv_cat>0 & cat==0 (build_features_v11.py). Kept here so load_anchor can
+# null-fill uncovered anchors without importing the builder.
+V11_WINDOWS = (30, 90, 365)
+V11_FEATS = ([f"v11_gc_nocat_days_{w}" for w in V11_WINDOWS]
+             + [f"v11_gc_nocat_share_{w}" for w in V11_WINDOWS]
+             + [f"v11_gmv_gc_nocat_{w}" for w in V11_WINDOWS]
+             + ["v11_rec_gc_nocat"])
+
 # v5 tier = joint low-rank factors of the user x week matrices (build_features_v5.py).
 # One frozen basis for every anchor, so factor j means the same thing at every anchor.
 # USE_V5=N takes the first N components (they are ordered by singular value); N <= 48.
@@ -121,6 +130,7 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     v7 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v7.parquet"
     v8 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v8.parquet"
     v10 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v10.parquet"
+    v11 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v11.parquet"
     v5 = FEATURES_DIR / f"anchor={anchor.isoformat()}.v5.parquet"
     seqoof = FEATURES_DIR / f"anchor={anchor.isoformat()}.seqoof.parquet"
     use2 = extra.exists() and os.environ.get("USE_V2")
@@ -134,11 +144,12 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
     use7 = os.environ.get("USE_V7")
     use8 = os.environ.get("USE_V8")
     use10 = os.environ.get("USE_V10")
+    use11 = os.environ.get("USE_V11")
     use5 = os.environ.get("USE_V5")
     use5s = os.environ.get("USE_V5S")
     use5cap = os.environ.get("USE_V5CAP")
     useoof = os.environ.get("USE_SEQOOF")
-    if not (use2 or use3 or use4 or use6 or use7 or use8 or use10 or use5
+    if not (use2 or use3 or use4 or use6 or use7 or use8 or use10 or use11 or use5
             or use5s or use5cap or useoof):
         return pl.read_parquet(p, columns=columns)
     df = pl.read_parquet(p)
@@ -171,6 +182,14 @@ def load_anchor(anchor: date, columns: list[str] | None = None) -> pl.DataFrame:
         else:
             df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
                                   for c in V10_FEATS])
+    if use11:
+        # v11 = non-synchronous catalog attribution (cross-device gmv_cat days);
+        # uncovered anchors get nulls, schema stays consistent
+        if v11.exists():
+            df = df.join(pl.read_parquet(v11), on="user_id", how="left")
+        else:
+            df = df.with_columns([pl.lit(None, dtype=pl.Float32).alias(c)
+                                  for c in V11_FEATS])
     if use5:
         # v5 = joint low-rank weekly factors; USE_V5=N keeps the first N components
         want = v5_cols(max(1, min(int(use5), V5_MAX_COMPS)))
