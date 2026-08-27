@@ -60,6 +60,45 @@ V2-ФЛАГИ (по умолчанию ВСЕ выключены; с выклю�
     cp ИМЯ.ckpt ИМЯ_v2.ckpt
     python kaggle_seq.py train --name ИМЯ_v2 --seed 42 --device cuda:0 --resume \
         --time-bias alibi --time2vec 8 --event-dropout 0.05 --mono-w 0.1 --swa-k 3
+
+V3: JOINT FUSION С ТАБЛИЦЕЙ (сессия 3; спека work/reports/eve2_joint_fusion_design.md;
+по умолчанию ВСЁ выключено — поведение тогда побитово v2, включая RNG-потоки,
+state_dict и формат чекпойнта):
+  build --gap N       последний обучающий якорь = VAL−N дней (default 30 = сетка v1/v2,
+                      понедельники; 35 = сетка СРЕД — день недели якоря совпадает с val,
+                      и ровно для неё существуют табличные экспорты tabf16)
+  --tab PATH          каталог с tabf16_*.npz + tabf16_meta.json (экспорт
+                      work/scripts/export_anchor_feats.py --grid wed); '' = авто-поиск
+                      tabf16_meta.json в /kaggle/input (дисциплина _find_input);
+                      таблица [26, U, F] f16 живёт на карте, препроцессинг — рецепт
+                      train_fusion3 (медиана -> клип [p1,p99] -> стандартизация;
+                      статистики ТОЛЬКО по обучающим срезам), вырожденные на train
+                      колонки (ya_* и др., 20 шт.) дропаются по meta
+  --tab-mode concat   вход транка 3d+tab_dim: z=trunk(cat[cls,hmean,hlast,tab_branch(x)]);
+                      tab_branch = Linear+GELU+LayerNorm (ровно таб-энкодер fusion_v3)
+  --tab-mode film     FiLM: g,b = zero-init Linear(tab_dim -> 2*3d), пул x*(1+g)+b;
+                      тождество на старте, аддитивного пути у пустых историй НЕТ
+  --tab-dim K         ширина таб-ветви (default 256)
+  --tab-dropout p     с вероятностью p ВЕСЬ таб-вклад сэмпла зануляется (train only):
+                      регуляризатор и страховка от коллапса в оболочку; ручка 0.3-0.5
+  --warm-from CKPT    тёплый старт с чекпойнта v1/v2: берутся ТОЛЬКО веса модели,
+                      оптимизатор/расписание/шаг/истории выгрузок — свежие; у
+                      trunk.0.weight, расширенного таблицей (concat), новые столбцы
+                      зануляются => прогноз на шаге 0 = прогнозу чекпойнта (проверяется
+                      assert'ом на 128 юзерах); ВАЖНО: арх. флаги сессии-источника
+                      (d/layers/heads/ff/lmax, v2-флаги форм) повторить дословно, иначе
+                      громкое падение. --resume в той же сессии работает как раньше
+                      (полное состояние) и имеет приоритет над --warm-from.
+  При включённом --tab каждый eval печатает пару score / tabzero (val-скор с занулённым
+  таб-вкладом): tabzero ~ кривой v2 => событийный путь жив; развал tabzero при хорошем
+  score => сеть стала функцией таблицы, поднять --tab-dropout до 0.3-0.5 и перезапуск
+  с того же --warm-from. Приговор дома: work/reports/eve2_collapse_check.py.
+Команда сессии 3 (T4 x2, чекпойнты kevf_s42/kevf_s1337 сессии 2 подключены
+как Add Input -> Notebooks):
+    python kaggle_seq.py build --gap 35
+    python kaggle_seq.py train --name kevf3_s42 --seed 42 --device cuda:0 \
+        --tab '' --tab-mode concat --tab-dropout 0.15 --lr 2e-4 \
+        --warm-from /kaggle/input/<ноутбук-с2>/kevf_s42.ckpt
 """
 from __future__ import annotations
 
@@ -133,9 +172,11 @@ def d2i(d: date) -> int:
     return (d - DAY0).days
 
 
-def train_anchors(n: int, stride: int) -> list[date]:
-    """Срезы с зазором 30: целевое окно кончается не позже валидационного якоря."""
-    last = VAL_ANCHOR - timedelta(days=30)          # 2025-12-15, самый поздний допустимый
+def train_anchors(n: int, stride: int, gap: int = 30) -> list[date]:
+    """Срезы: последний якорь = VAL−gap. Протокольный зазор ≥30 проверяется ВСЕГДА
+    (целевое окно каждого среза кончается не позже валидационного якоря); gap=35
+    переводит сетку на среды — день недели якоря совпадает с val/test."""
+    last = VAL_ANCHOR - timedelta(days=gap)         # 30 -> 2025-12-15 (Пн), 35 -> 2025-12-10 (Ср)
     out = [last - timedelta(days=stride * k) for k in range(n)]
     assert all(a + timedelta(days=30) <= VAL_ANCHOR for a in out)
     assert min(out) >= date(2025, 5, 1), "якорь слишком ранний: истории почти нет"
@@ -188,7 +229,8 @@ def cmd_build(args) -> None:
 
     # границы окна (a-WINDOW, a] на пользователя: searchsorted по ключу uidx*512+didx
     key = uidx.astype(np.int64) * 512 + didx
-    anchors = train_anchors(args.n_anchors, args.stride) + [VAL_ANCHOR, TEST_ANCHOR]
+    anchors = (train_anchors(args.n_anchors, args.stride, args.gap)
+               + [VAL_ANCHOR, TEST_ANCHOR])
     u = np.arange(N_USERS, dtype=np.int64) * 512
     bounds = np.empty((len(anchors), 2, N_USERS), dtype=np.int64)
     for i, a in enumerate(anchors):
@@ -218,7 +260,7 @@ def cmd_build(args) -> None:
         "n_events": int(n_ev), "window": WINDOW, "channels": [c for c, _ in CHANNELS],
         "scales": [SCALES[k] for _, k in CHANNELS],
         "anchors": [a.isoformat() for a in anchors],
-        "n_train": args.n_anchors, "stride": args.stride}, indent=1))
+        "n_train": args.n_anchors, "stride": args.stride, "gap": args.gap}, indent=1))
     gb = (didx.nbytes // 2 + ch.nbytes) / 1e9
     print(f"хранилище готово: {gb:.2f} ГБ событий, {len(anchors)-2} обучающих срезов "
           f"({anchors[0]}..{anchors[-3]}), всё за {time.time()-t0:.0f}с", flush=True)
@@ -341,6 +383,109 @@ class GpuStore:
     F_DIM = C + 3 + 7 + 2
 
 
+# ---------------- v3: таблица на карте (joint fusion) ----------------
+# Препроцессинг — рецепт train_fusion3.py (fit_stats/apply_stats_f16 скопированы
+# оттуда дословно): медианная импутация NaN -> клип в train-[p1, p99] ->
+# стандартизация; статистики по страйд-подвыборке <= STATS_MAX_ROWS строк.
+
+STATS_MAX_ROWS = 750_000
+
+
+def fit_stats(X: np.ndarray) -> dict:
+    step = max(1, int(np.ceil(X.shape[0] / STATS_MAX_ROWS)))
+    S = np.ascontiguousarray(X[::step])
+    q = np.nanpercentile(S, [1.0, 50.0, 99.0], axis=0)
+    med = np.where(np.isfinite(q[1]), q[1], 0.0).astype(np.float32)
+    lo = np.where(np.isfinite(q[0]), q[0], med).astype(np.float32)
+    hi = np.where(np.isfinite(q[2]), q[2], med).astype(np.float32)
+    np.copyto(S, np.broadcast_to(med, S.shape), where=np.isnan(S))
+    np.clip(S, lo, hi, out=S)
+    mean = S.mean(axis=0, dtype=np.float64).astype(np.float32)
+    std = S.std(axis=0, dtype=np.float64).astype(np.float32)
+    std[~np.isfinite(std) | (std < 1e-7)] = 1.0
+    del S
+    return dict(med=med, lo=lo, hi=hi, mean=mean, std=std)
+
+
+def apply_stats_f16(X: np.ndarray, s: dict) -> np.ndarray:
+    """In-place impute/clip/standardize, then downcast to float16 (значения
+    стандартизованы и клипнуты в train-[p1,p99] — заведомо в диапазоне f16)."""
+    np.copyto(X, np.broadcast_to(s["med"], X.shape), where=np.isnan(X))
+    np.clip(X, s["lo"], s["hi"], out=X)
+    X -= s["mean"]
+    X /= s["std"]
+    return X.astype(np.float16)
+
+
+def _find_tab(spec: str) -> Path:
+    """Каталог табличных матриц: --tab ПУТЬ, либо '' = авто-поиск tabf16_meta.json
+    в /kaggle/input на глубину до 3 уровней (та же дисциплина, что _find_input:
+    не нашли — падаем ГРОМКО и показываем, что смонтировано)."""
+    if spec:
+        p = Path(spec)
+        if (p / "tabf16_meta.json").exists():
+            return p
+        sys.exit(f"--tab {spec}: в каталоге нет tabf16_meta.json "
+                 "(нужен экспорт export_anchor_feats.py --grid wed)")
+    cand: list[Path] = []
+    for depth in ("", "*/", "*/*/", "*/*/*/"):
+        cand += [Path(q).parent for q in
+                 sorted(glob.glob(f"/kaggle/input/{depth}tabf16_meta.json"))]
+    if cand:
+        return cand[0]
+    ki = Path("/kaggle/input")
+    listing = ("\n".join(f"  {p}" for p in sorted(ki.glob("*/**"))[:40]) or "  (пусто)"
+               ) if ki.exists() else "  (нет /kaggle/input — это не Kaggle)"
+    sys.exit("не найден tabf16_meta.json: прикрепи датасет с tabf16_*.npz через "
+             f"Add Input или укажи --tab /путь. Сейчас в /kaggle/input:\n{listing}")
+
+
+class TabStore:
+    """[A, U, F_eff] float16 на устройстве; batch() — gather по (якорь, юзер).
+
+    Статистики препроцессинга — ТОЛЬКО по обучающим срезам (страйд-подвыборка
+    строк: те же строки, что взял бы fit_stats от полного train-блока, но без
+    f32-копии всего блока), применяются ко всем 26 срезам. Колонки, вырожденные
+    на train-срезах (ya_*-семейство и др.: данные начинаются 2025-01-01, «год
+    назад» на срезах пуст, а на val/test уже нет — ЛОВУШКА ПРИЗНАКОВ), дропаются
+    по meta: сеть их не видит нигде."""
+
+    def __init__(self, device, store: GpuStore, path: Path):
+        import torch
+        t0 = time.time()
+        meta = json.loads((path / "tabf16_meta.json").read_text())
+        assert [a.isoformat() for a in store.anchors] == meta["anchors"], \
+            "якоря таблицы != якоря хранилища (build --gap 35 забыт?)"
+        drop = set(meta["degenerate_on_train_slices"])
+        keep = [j for j, c in enumerate(meta["cols"]) if c not in drop]
+        self.cols = [meta["cols"][j] for j in keep]
+        uid0 = np.load(STORE / "user_ids.npy")
+        mats = []
+        for a in meta["anchors"]:
+            d = np.load(path / f"tabf16_{a}.npz")
+            assert np.array_equal(d["user_id"], uid0), f"user_id таблицы != хранилища ({a})"
+            mats.append(d["feats"][:store.users, keep])         # f16, NaN на месте
+        X = np.stack(mats)                                      # [26, U, F_eff] f16
+        del mats
+        flat = X[:store.n_train].reshape(-1, X.shape[-1])
+        step = max(1, int(np.ceil(flat.shape[0] / STATS_MAX_ROWS)))
+        st = fit_stats(flat[::step].astype(np.float32))
+        self.x = torch.from_numpy(np.stack(
+            [apply_stats_f16(m.astype(np.float32), st) for m in X])).to(device)
+        del X
+        print(f"таблица: {tuple(self.x.shape)} f16 на {device} "
+              f"({self.x.numel() * 2 / 1e9:.2f} ГБ), дроп {len(drop)} вырожденных "
+              f"колонок, {time.time() - t0:.0f}с", flush=True)
+
+    @property
+    def f_eff(self) -> int:
+        return int(self.x.shape[-1])
+
+    def batch(self, a_ids, u_ids):
+        import torch
+        return self.x[a_ids, u_ids].to(torch.float32)           # [B, F_eff]
+
+
 # ---------------- модель ----------------
 
 def _avg_states(states: list[dict]) -> dict:
@@ -388,7 +533,63 @@ def _warm_load(model, sd: dict) -> None:
           + (f", пропущено {skipped}" if skipped else ""), flush=True)
 
 
-def build_model(args, device):
+def _warm_from(model, sd: dict) -> None:
+    """v3 --warm-from: ТОЛЬКО веса модели, загрузка строгая. Единственное разрешённое
+    расхождение форм — trunk.0.weight, расширенный по входу таб-ветвью (concat):
+    старые столбцы копируются, новые ЗАНУЛЯЮТСЯ => прогноз на шаге 0 = прогнозу
+    чекпойнта, таблица входит со скоростью градиента. Любой другой конфликт форм
+    или ключей — громкое падение: арх. флаги сессии-источника (d/layers/heads/ff/
+    lmax, v2-флаги форм) повторять дословно, cfg лежит в <имя>.json чекпойнта."""
+    import torch
+    own = model.state_dict()
+    extra = [k for k in sd if k not in own]
+    if extra:
+        sys.exit(f"--warm-from: в чекпойнте параметры, которых нет в модели: {extra}."
+                 " Повтори арх. флаги сессии-источника (cfg в <имя>.json рядом)")
+    copied = 0
+    with torch.no_grad():
+        for k, v in sd.items():
+            t = own[k]
+            if t.shape == v.shape:
+                t.copy_(v)
+            elif (k == "trunk.0.weight" and t.dim() == 2 == v.dim()
+                  and t.shape[0] == v.shape[0] and t.shape[1] > v.shape[1]):
+                t.zero_()
+                t[:, :v.shape[1]].copy_(v)
+            else:
+                sys.exit(f"--warm-from: форма {k}: чекпойнт {tuple(v.shape)} != "
+                         f"модель {tuple(t.shape)}. Повтори арх. флаги сессии-источника")
+            copied += 1
+    fresh = [k for k in own if k not in sd]
+    bad = [k for k in fresh if not k.startswith(("tab_branch.", "film."))]
+    if bad:
+        sys.exit(f"--warm-from: у модели есть не-табличные параметры без весов в "
+                 f"чекпойнте: {bad}. Повтори арх. флаги сессии-источника")
+    print(f"--warm-from: скопировано {copied} тензоров; свежая инициализация: "
+          f"{fresh if fresh else 'нет'}", flush=True)
+
+
+def _warm_assert(model, store, tab_store, device, lmax: int) -> None:
+    """Дешёвый смоук спеки: после warm-старта прогноз С таблицей на шаге 0 равен
+    прогнозу БЕЗ неё (= прогнозу чекпойнта-источника): у concat новые столбцы
+    транка нулевые, у film g=b=0. 128 юзеров, f32, без AMP."""
+    import torch
+    model.eval()
+    n = min(128, store.users)
+    a = torch.full((n,), len(store.anchors) - 2, dtype=torch.long, device=device)
+    u = torch.arange(n, dtype=torch.long, device=device)
+    with torch.no_grad():
+        feats, valid, dta = store.batch(a, u, lmax)
+        p0 = model(feats, valid, dta, None)[:2]
+        p1 = model(feats, valid, dta, tab_store.batch(a, u))[:2]
+    diff = max(float((x - y).abs().max()) for x, y in zip(p0, p1))
+    model.train()
+    assert diff < 1e-4, f"warm-старт не тождественен на шаге 0: maxdiff {diff:.2e}"
+    print(f"warm-старт OK: прогноз шага 0 с таблицей == без неё (maxdiff {diff:.2e})",
+          flush=True)
+
+
+def build_model(args, device, tab_in: int = 0):
     import torch
     import torch.nn as nn
 
@@ -399,6 +600,13 @@ def build_model(args, device):
     enc_gru = getattr(args, "encoder", "tfm") == "gru"
     assert not (enc_gru and (alibi or with_dt)), \
         "--encoder gru: --time-bias/--aux-dt — механизмы внимания и порядка токенов тфм-пути"
+    # v3: таблица; tab_in = F_eff (0 = выключено, путь тогда побитово v2)
+    tab_mode = getattr(args, "tab_mode", "concat")
+    tab_dim = getattr(args, "tab_dim", 256)
+    tab_drop = getattr(args, "tab_dropout", 0.0)
+    assert not (enc_gru and tab_in), \
+        "--tab реализован для тфм-энкодера (v3.0); gru-фьюжн — отдельная ручка"
+    cat_dim = tab_dim if (tab_in and tab_mode == "concat") else 0
 
     class EventNet(nn.Module):
         def __init__(self):
@@ -422,7 +630,7 @@ def build_model(args, device):
                 self.enc = nn.TransformerEncoder(layer, num_layers=args.layers,
                                                  norm=nn.LayerNorm(d),
                                                  enable_nested_tensor=False)
-            blocks, prev = [], 3 * d
+            blocks, prev = [], 3 * d + cat_dim   # cat_dim=0 без --tab: побитово v2
             for hdim in (384, 256):
                 blocks += [nn.Linear(prev, hdim), nn.GELU(), nn.LayerNorm(hdim),
                            nn.Dropout(args.dropout)]
@@ -446,8 +654,19 @@ def build_model(args, device):
                     torch.tensor(2 * np.pi / per, dtype=torch.float32)]))
                 self.t2v_b = nn.Parameter(torch.zeros(t2v_k))
             self.head_dt = nn.Linear(d, 1) if with_dt else None   # log1p(Δдо след. дня)
+            # v3: таб-ветвь создаётся СТРОГО после v1/v2-параметров и только при
+            # включённом --tab — иначе RNG инициализации и state_dict побитово v2.
+            self.tab_branch = None
+            self.film = None
+            if tab_in:   # ровно таб-энкодер fusion_v3: Linear + GELU + LayerNorm
+                self.tab_branch = nn.Sequential(nn.Linear(tab_in, tab_dim),
+                                                nn.GELU(), nn.LayerNorm(tab_dim))
+                if tab_mode == "film":   # zero-init => тождество на старте
+                    self.film = nn.Linear(tab_dim, 2 * 3 * d)
+                    nn.init.zeros_(self.film.weight)
+                    nn.init.zeros_(self.film.bias)
 
-        def forward(self, feats, valid, dta=None):
+        def forward(self, feats, valid, dta=None, tab=None):
             B, L = valid.shape
             x = feats
             if t2v_k > 0:  # Time2Vec от дней до якоря: [w0*t+b0, sin(w_i*t+b_i)...]
@@ -502,7 +721,31 @@ def build_model(args, device):
             cnt = valid.sum(dim=1, keepdim=True).clamp(min=1)
             hmean = (ev * valid.unsqueeze(2)).sum(dim=1) / cnt
             hlast = ev[:, 0] * (valid[:, :1]).to(ev.dtype)          # свежайшее событие
-            z = self.trunk(torch.cat([h[:, 0], hmean, hlast], dim=1))
+            zin = torch.cat([h[:, 0], hmean, hlast], dim=1)
+            if self.tab_branch is None:                             # путь v1/v2, побитово
+                z = self.trunk(zin)
+            elif self.film is None:                                 # v3 concat
+                # tab=None = «таб-вклад занулён» (score_tabzero и старт warm-from:
+                # нулевые новые столбцы транка дают тот же ноль); tab-dropout
+                # зануляет ВЕСЬ таб-вектор сэмпла — событийный путь обязан жить сам
+                if tab is None:
+                    th = zin.new_zeros(B, self.tab_branch[0].out_features)
+                else:
+                    th = self.tab_branch(tab)
+                    if self.training and tab_drop > 0:
+                        keep = (torch.rand(B, 1, device=th.device)
+                                >= tab_drop).to(th.dtype)
+                        th = th * keep
+                z = self.trunk(torch.cat([zin, th], dim=1))
+            else:                                                   # v3 film
+                if tab is not None:
+                    g, b = self.film(self.tab_branch(tab)).chunk(2, dim=1)
+                    if self.training and tab_drop > 0:   # у выброшенных g=b=0: тождество
+                        keep = (torch.rand(B, 1, device=g.device)
+                                >= tab_drop).to(g.dtype)
+                        g, b = g * keep, b * keep
+                    zin = zin * (1 + g) + b
+                z = self.trunk(zin)
             dt_pred = (self.head_dt(ev).squeeze(2) if self.head_dt is not None
                        else None)
             return (self.head_logit(z).squeeze(1), self.head_mu(z).squeeze(1),
@@ -510,11 +753,15 @@ def build_model(args, device):
 
     m = EventNet().to(device)
     print(f"модель: Lmax={lmax} d={d} слоёв={args.layers} "
-          f"параметров={sum(p.numel() for p in m.parameters()):,}", flush=True)
+          + (f"таблица {tab_in}->{tab_dim} ({tab_mode}, drop {tab_drop}) " if tab_in
+             else "")
+          + f"параметров={sum(p.numel() for p in m.parameters()):,}", flush=True)
     return m
 
 
-def predict_log(model, store, a_id: int, device, batch: int) -> np.ndarray:
+def predict_log(model, store, a_id: int, device, batch: int, tab=None) -> np.ndarray:
+    """tab: TabStore или None. None при включённой таблице = score_tabzero (§4.1
+    спеки): валовый скор с занулённым таб-вкладом — ранний детектор коллапса."""
     import torch
     model.eval()
     n = store.users
@@ -524,8 +771,9 @@ def predict_log(model, store, a_id: int, device, batch: int) -> np.ndarray:
         for s_ in range(0, n, batch):
             u = torch.arange(s_, min(s_ + batch, n), device=device)
             feats, valid, dta = store.batch(a[:len(u)], u, model.pos.shape[1] - 1)
+            tb = tab.batch(a[:len(u)], u) if tab is not None else None
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-                logit, mu = model(feats, valid, dta)[:2]
+                logit, mu = model(feats, valid, dta, tb)[:2]
             out[s_:s_ + len(u)] = (torch.sigmoid(logit.float())
                                    * torch.clamp(mu.float(), min=0)).cpu().numpy()
     model.train()
@@ -549,14 +797,25 @@ def _v2_cfg(args) -> dict:
             if getattr(args, k) not in ("none", 0, 0.0)}
 
 
-def dump(model, store, args, state, device):
+def _v3_cfg(args) -> dict:
+    """Активные v3-поля; пустой словарь == v1/v2 (json не меняется)."""
+    out = {}
+    if getattr(args, "tab", None) is not None:
+        out.update(tab=args.tab, tab_mode=args.tab_mode, tab_dim=args.tab_dim,
+                   tab_dropout=args.tab_dropout)
+    if getattr(args, "warm_from", ""):
+        out["warm_from"] = args.warm_from
+    return out
+
+
+def dump(model, store, args, state, device, tab=None):
     """Val И test с ОДНИХ текущих весов, оба в скользящее среднее последних K выгрузок.
     Записываются усреднённые файлы + контрольная точка для продолжения.
     При --swa-k дополнительно: среднее ВЕСОВ последних K выгрузок (тех же точек, что
     усредняются предсказаниями) -> ИМЯ_swa_val.parquet / ИМЯ_swa_test.parquet."""
     import torch
-    pv = predict_log(model, store, len(store.anchors) - 2, device, args.eval_batch)
-    pt = predict_log(model, store, len(store.anchors) - 1, device, args.eval_batch)
+    pv = predict_log(model, store, len(store.anchors) - 2, device, args.eval_batch, tab)
+    pt = predict_log(model, store, len(store.anchors) - 1, device, args.eval_batch, tab)
     state["pv_hist"] = (state["pv_hist"] + [pv])[-args.pred_avg:]
     state["pt_hist"] = (state["pt_hist"] + [pt])[-args.pred_avg:]
     pv_avg = np.mean(np.stack(state["pv_hist"]), axis=0)
@@ -568,8 +827,10 @@ def dump(model, store, args, state, device):
         cur = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         state["w_hist"] = (state["w_hist"] + [cur])[-args.swa_k:]
         model.load_state_dict(_avg_states(state["w_hist"]))
-        swa_v = predict_log(model, store, len(store.anchors) - 2, device, args.eval_batch)
-        swa_t = predict_log(model, store, len(store.anchors) - 1, device, args.eval_batch)
+        swa_v = predict_log(model, store, len(store.anchors) - 2, device,
+                            args.eval_batch, tab)
+        swa_t = predict_log(model, store, len(store.anchors) - 1, device,
+                            args.eval_batch, tab)
         model.load_state_dict(cur)   # обучение продолжается с прежних весов
         swa_sc = cal_rmsle_2fold(swa_v, state["ly_val"], state["y_val"], state["half"])
 
@@ -586,15 +847,18 @@ def dump(model, store, args, state, device):
         pl.DataFrame({"user_id": uid, "pred": np.expm1(np.clip(swa_t, 0, None))}
                      ).write_parquet(OUT / f"{args.name}_swa_test.parquet")
     v2 = _v2_cfg(args)   # в json и чекпойнт v2-поля попадают только при включённых флагах
+    v3 = _v3_cfg(args)   # то же для v3: без --tab/--warm-from json побитово прежний
     (OUT / f"{args.name}.json").write_text(json.dumps({
         "arm": "event", "seed": args.seed, "step": state["step"], "total": state["total"],
         "cal_rmsle_last": state["curve"][-1] if state["curve"] else None,
         "cal_rmsle_best": min(state["curve"]) if state["curve"] else None,
         "cal_rmsle_file": sc_file, "curve": state["curve"],
         **({"cal_rmsle_swa": swa_sc} if swa_sc is not None else {}),
+        **({"curve_tabzero": state["curve0"]} if state["curve0"] else {}),
         "cfg": {k: getattr(args, k) for k in
                 ("encoder", "d", "layers", "heads", "ff", "lmax", "batch", "lr", "epochs")},
         **({"v2": v2} if v2 else {}),
+        **({"v3": v3} if v3 else {}),
         "n_anchors": store.n_train, "done": state["step"] >= state["total"],
         "minutes": (time.time() - state["t0"]) / 60}, indent=1))
     torch.save({"model": model.state_dict(), "opt": state["opt"].state_dict(),
@@ -603,7 +867,8 @@ def dump(model, store, args, state, device):
                 "curve": state["curve"],
                 "pv_hist": np.stack(state["pv_hist"]).astype(np.float32),
                 "pt_hist": np.stack(state["pt_hist"]).astype(np.float32),
-                **({"w_hist": state["w_hist"]} if args.swa_k > 0 else {})},
+                **({"w_hist": state["w_hist"]} if args.swa_k > 0 else {}),
+                **({"curve0": state["curve0"]} if state["curve0"] else {})},
                ROOT / f"{args.name}.ckpt")
     print(f"  ВЫГРУЗКА на шаге {state['step']}: скор файла (среднее {len(state['pv_hist'])}"
           f" выгрузок) {sc_file:.6f}"
@@ -639,7 +904,11 @@ def cmd_train(args) -> None:
     half = np.random.default_rng(0).random(users) < 0.5   # то же деление, что в ingest.py
     bin_edges = torch.linspace(1e-6, 11.5, 31, device=device)
 
-    model = build_model(args, device)
+    # v3: таблица (--tab не задан -> None, путь побитово v2; TabStore не трогает
+    # RNG — сборка модели ниже получает те же потоки инициализации)
+    tab_store = (TabStore(device, store, _find_tab(args.tab))
+                 if args.tab is not None else None)
+    model = build_model(args, device, tab_in=tab_store.f_eff if tab_store else 0)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
     steps_per_epoch = (n_tr * users + args.batch - 1) // args.batch
     total = steps_per_epoch * args.epochs
@@ -652,9 +921,9 @@ def cmd_train(args) -> None:
         milestones=[warm])
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
 
-    state = dict(step=0, total=total, curve=[], pv_hist=[], pt_hist=[], w_hist=[],
-                 opt=opt, sched=sched, scaler=scaler, y_val=y_val, ly_val=ly_val,
-                 half=half, t0=time.time())
+    state = dict(step=0, total=total, curve=[], curve0=[], pv_hist=[], pt_hist=[],
+                 w_hist=[], opt=opt, sched=sched, scaler=scaler, y_val=y_val,
+                 ly_val=ly_val, half=half, t0=time.time())
     ck_path = ROOT / f"{args.name}.ckpt"
     if args.resume and ck_path.exists():
         st = torch.load(ck_path, map_location=device, weights_only=False)
@@ -668,6 +937,7 @@ def cmd_train(args) -> None:
             opt.load_state_dict(st["opt"])
             sched.load_state_dict(st["sched"]); scaler.load_state_dict(st["scaler"])
             state["step"] = int(st["step"]); state["curve"] = list(st["curve"])
+            state["curve0"] = list(st.get("curve0", []))
             state["pv_hist"] = [a for a in np.asarray(st["pv_hist"])]
             state["pt_hist"] = [a for a in np.asarray(st["pt_hist"])]
             state["w_hist"] = [{k: v.cpu() for k, v in d.items()}
@@ -676,6 +946,12 @@ def cmd_train(args) -> None:
         else:
             print("оптимизатор, расписание и истории выгрузок начаты заново "
                   "(тёплый старт весов, шаг 0)", flush=True)
+    elif args.warm_from:   # v3: только веса модели; opt/sched/шаг/истории — свежие
+        st = torch.load(args.warm_from, map_location=device, weights_only=False)
+        _warm_from(model, st["model"])
+        del st
+        if tab_store is not None:
+            _warm_assert(model, store, tab_store, device, args.lmax)
 
     print(f"срезов {n_tr}, пользователей {users:,}, шагов за эпоху {steps_per_epoch}, "
           f"всего {total}; замер каждые {args.eval_every}, выгрузка каждые "
@@ -691,10 +967,11 @@ def cmd_train(args) -> None:
             a_ids, u_ids = idx // users, idx % users
             feats, valid, dta = store.batch(a_ids, u_ids, args.lmax,
                                             args.event_dropout, args.interval_jitter)
+            tb = tab_store.batch(a_ids, u_ids) if tab_store is not None else None
             yb = tg[a_ids, u_ids]                              # [B, 3] log1p
             bb = (yb[:, 0] > 0).float()
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-                logit, mu, aux, bins, dt_pred = model(feats, valid, dta)
+                logit, mu, aux, bins, dt_pred = model(feats, valid, dta, tb)
                 bce = F.binary_cross_entropy_with_logits(logit, bb)
                 pos = bb > 0
                 mse_pos = (F.mse_loss(mu[pos], yb[pos, 0]) if pos.any()
@@ -727,13 +1004,20 @@ def cmd_train(args) -> None:
             state["step"] += 1
 
             if state["step"] % args.eval_every == 0 or state["step"] == total:
-                pv = predict_log(model, store, val_id, device, args.eval_batch)
+                pv = predict_log(model, store, val_id, device, args.eval_batch,
+                                 tab_store)
                 sc = cal_rmsle_2fold(pv, ly_val, y_val, half)
                 state["curve"].append(sc)
+                extra = ""
+                if tab_store is not None:   # §4.1: пара score/tabzero каждым eval'ом
+                    pv0 = predict_log(model, store, val_id, device, args.eval_batch)
+                    sc0 = cal_rmsle_2fold(pv0, ly_val, y_val, half)
+                    state["curve0"].append(sc0)
+                    extra = f" | tabzero {sc0:.6f}"
                 print(f"шаг {state['step']}/{total} эпоха {ep} калиброванный скор "
-                      f"{sc:.6f} ({time.time()-state['t0']:.0f}с)", flush=True)
+                      f"{sc:.6f}{extra} ({time.time()-state['t0']:.0f}с)", flush=True)
             if state["step"] % args.dump_every == 0 or state["step"] == total:
-                dump(model, store, args, state, device)
+                dump(model, store, args, state, device, tab_store)
             if state["step"] >= total:
                 break
         off = 0
@@ -750,6 +1034,9 @@ def main() -> None:
     b = sub.add_parser("build", help="train.parquet -> хранилище событий + границы + цели")
     b.add_argument("--n-anchors", type=int, default=24)
     b.add_argument("--stride", type=int, default=7)
+    b.add_argument("--gap", type=int, default=30,
+                   help="последний обучающий якорь = VAL−gap; 35 = сетка СРЕД, "
+                        "ровно под табличные экспорты tabf16 (--tab)")
     b.set_defaults(fn=cmd_build)
 
     t = sub.add_parser("train", help="обучить и записать предсказания")
@@ -797,6 +1084,19 @@ def main() -> None:
                    help="вес регрессии log1p(Δдней до следующего активного дня)")
     t.add_argument("--swa-k", type=int, default=0,
                    help="усреднять веса последних K выгрузок -> ИМЯ_swa_{val,test}.parquet")
+    # v3-флаги (joint fusion, см. докстринг): по умолчанию выключены — побитово v2
+    t.add_argument("--tab", default=None,
+                   help="каталог tabf16_*.npz+tabf16_meta.json; '' = авто-поиск в "
+                        "/kaggle/input; не задан = без таблицы (путь побитово v2)")
+    t.add_argument("--tab-mode", choices=["concat", "film"], default="concat",
+                   help="concat: транк 3d+tab_dim; film: zero-init модуляция пула")
+    t.add_argument("--tab-dim", type=int, default=256, help="ширина таб-ветви")
+    t.add_argument("--tab-dropout", type=float, default=0.15,
+                   help="вероятность занулить ВЕСЬ таб-вклад сэмпла (train; "
+                        "страховка от коллапса, ручка реакции 0.3-0.5)")
+    t.add_argument("--warm-from", default="",
+                   help="чекпойнт v1/v2: только веса модели, строго; расширенный "
+                        "таблицей вход транка дозаполняется нулями (старт = v2)")
     t.set_defaults(fn=cmd_train)
 
     args = ap.parse_args()
