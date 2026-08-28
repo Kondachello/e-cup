@@ -28,7 +28,7 @@ python final_submission/inference.py --stage check
 | `NAME__TAG.txt` | бустер LightGBM подмодели TAG (`__stage1`/`__stage2`, `__count`/`__aov`) | `model_io.save_lgb()` |
 | `NAME.xgb.json` | бустер XGBoost | `model_io.save_xgb()` |
 | `NAME_cal.npz` | поквантильная калибровка: `centers`, `shifts` | `calibrate.py` |
-| `chain_test.npz` | замороженная цепочка (см. ниже) | `inference.py --stage freeze` |
+| `chain_test.npz` | оценённая цепочка поправок (см. ниже) | `inference.py --stage freeze` |
 | `silence_p_test.npz` | вероятность молчания для 250 000 (кэш шага 6) | `inference.py --stage silence` |
 | `preds_test/` | кэш стадии `predict` | `inference.py` |
 
@@ -91,7 +91,7 @@ python final_submission/inference.py --stage check
 * `BLEND_WEIGHTS` — 20 весов, источник `work/reports/blend_reopt.json`, ключ `winner`
   (библиотека `B_plus_cal`, метод `ridge_free`, `alpha_rel` 1e-4). Сверка с текущим
   отчётом: `inference.py --stage check --verify-blend`;
-* `REF_MEAN = 2.324718…`, `REF_SD = 1.632001…` — моменты log1p, замеренные на лидерборде;
+* `REF_MEAN = 2.324718…`, `REF_SD = 1.632001…` — моменты log1p, оценённые для целевого окна;
 * `STEP = 0.469` — сила шага от опорного файла к новому кандидату;
 * `Q_REF = 0.0027149`, `P_LEVEL = 0.030843`, `A_OLD = 0.894`, `A_NEW = 0.65` — поправка на
   молчащих.
