@@ -200,10 +200,13 @@ def main():
     for name, l in lp.items():
         pv = np.expm1(l)
         save_preds(name, "val", uid, pv)
-        note = (f"lag-TTA {args.objective} cut{gap_cut} n{len(tr_anchors)} it={it}; "
-                + (f"mix {MIXES[name]}" if name in MIXES else
-                   f"features at {stale.get(name, VAL_ANCHOR)}"))
-        log_score(name, rmsle(yv_raw, pv), note)
+        # ИМЯ note ЗАНЯТО функцией провенанса (импорт из exp_lib), и присваивание здесь
+        # делало её локальной на всю функцию — вызов note(...) выше падал с
+        # UnboundLocalError ещё до обучения. Строка переименована, функция не тронута.
+        note_txt = (f"lag-TTA {args.objective} cut{gap_cut} n{len(tr_anchors)} it={it}; "
+                    + (f"mix {MIXES[name]}" if name in MIXES else
+                       f"features at {stale.get(name, VAL_ANCHOR)}"))
+        log_score(name, rmsle(yv_raw, pv), note_txt)
 
     e0 = lp[fresh] - yv
     for name in stale:

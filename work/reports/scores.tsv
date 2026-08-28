@@ -604,3 +604,18 @@ bagged_champ8	1.689218	bagged n=8 pool=24 gap30 it=[266, 243, 73, 76, 75, 286, 1
 bagged_champ8_cal	1.670196	binned log-shift calibration of bagged_champ8; holdout 1.689435->1.670565
 c_ts2_s42	1.692342	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io
 behavonly	1.712425	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io
+weak_an_d_fz	1.695393	weak/anchors k=4 sel_seed=77; 203 feats
+weak_ft_recency_fz	1.730688	weak/ftype ftype=recency; 21 feats
+c_ts2_s42_fz	1.696260	lgb/two_stage
+febspec2_fz	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
+lagfz0	1.679469	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2026-01-14
+lagfz14	1.715825	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-31
+lagfz28	1.745023	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-17
+lagfz42	1.767829	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-03
+lagfz56	1.791567	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-11-19
+lagfz70	1.807626	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-11-05
+weak_an_d_fz_cal	1.672794	binned log-shift calibration of weak_an_d_fz; holdout 1.696216->1.673505
+weak_ft_recency_fz_cal	1.701313	binned log-shift calibration of weak_ft_recency_fz; holdout 1.731657->1.702014
+c_ts2_s42_fz_cal	1.668328	binned log-shift calibration of c_ts2_s42_fz; holdout 1.696623->1.668819
+febspec2_fz_cal	1.770665	binned log-shift calibration of febspec2_fz; holdout 1.782185->1.768060
+RETRAIN_FREEZE	-	Ретрейн заморозки 28.08 на составе из 18 членов: переобучено 7.8% веса (покрытие упало с 20.5% — GPU-секвенсы забрали половину состава), сдвиг решения +0.000080 = 3.6 шума. Все четыре табличные воспроизвели свои прогоны 25.08 до знака после отвязки якорей от каталога. Расхождение lagd28 (+0.000448) — разница протоколов n18 против n9, а не невоспроизводимость
