@@ -53,6 +53,31 @@ TAG = ""
 EB_MODEL = False                      # считать ли EB модельного семейства
 EB_APPLY = False                      # подставить ли EB-оценку в PRIOR_MODEL
 EB_MU_FIX = None                      # если задано — mu приора фиксируется
+SEG_SPLIT = ""                        # EB-SEG: "" | "4" | "3" | "silent"
+SEG_DUMP = True                       # выгружать точки сегментного EB
+
+
+# те же правила для 15 внегэлэсных сегментных зондов)
+SEG_GROUP = {
+    "": "silent", "": "silent", "seg_realgr": "silent", "": "silent", "": "silent",
+    "": "silent", "": "silent",
+    "": "temporal", "": "temporal", "": "temporal", "": "temporal",
+    "": "temporal", "": "temporal", "": "temporal", "": "temporal",
+    "": "temporal", "": "temporal", "": "temporal", "": "temporal",
+    "": "temporal", "": "temporal",
+    "": "cart_promo", "": "cart_promo", "": "cart_promo", "": "cart_promo",
+    "": "cart_promo", "": "cart_promo", "": "cart_promo", "": "cart_promo",
+    "": "cart_promo", "": "cart_promo",
+    "": "audience", "": "audience", "": "audience", "": "audience",
+    "": "audience",
+}
+def seg_grp(k, mode):
+    g = SEG_GROUP[k]
+    if mode == "3" and g == "audience":
+        g = "cart_promo"
+    if mode == "silent":
+        g = "silent" if g == "silent" else "rest"
+    return g
 
 
 # формо-дозы F7 сверх F6 (координатор, 29.08) — для сверки разложения
@@ -291,6 +316,35 @@ def main() -> None:
     print(f"  {len(seg_pts)} точек; ML: mu_seg = {MU_SEG:+.4f}, tau_seg = {TAU_SEG:.4f} "
           f"(K1b на 32 точках: +0.026 / 0.121)")
 
+    # ---------------- EB-SEG: выгрузка точек и расщепление сегментного приора ----------------
+    SEG_PRIOR = {}          # ось -> (mu, tau); пусто => единый (MU_SEG, TAU_SEG)
+    seg_split_info = None
+    if SEG_DUMP:
+        np.savez(OUT / f"eb_seg_points{TAG}.npz",
+                 names=np.array([p[0] for p in seg_pts]),
+                 kappa=np.array([p[1] for p in seg_pts]),
+                 sigma=np.array([p[2] for p in seg_pts]),
+                 in_gls=np.array([1 if p[0] in names else 0 for p in seg_pts]))
+        print(f"  точки сегментного EB выгружены: {OUT/f'eb_seg_points{TAG}.npz'}")
+    if SEG_SPLIT:
+        gl = [seg_grp(p[0], SEG_SPLIT) for p in seg_pts]
+        seg_split_info = {}
+        for g in sorted(set(gl)):
+            idx = [i for i, x in enumerate(gl) if x == g]
+            kg, sg = ks[idx], ss[idx]
+
+            # ML подгруппы: mu профилируется аналитически (GLS), сетка только по tau
+            tg = np.linspace(0.0, 0.60, 1201)
+            vv = [_nll_prof(t, kg, sg) for t in tg]
+            jj = int(np.argmin([x[0] for x in vv]))
+            bg = (vv[jj][0], vv[jj][1], float(tg[jj]))
+            seg_split_info[g] = dict(n=len(idx), mu=bg[1], tau=bg[2], nll=bg[0],
+                                     axes=[seg_pts[i][0] for i in idx])
+            for i in idx:
+                SEG_PRIOR[seg_pts[i][0]] = (bg[1], bg[2])
+            print(f"  [split {g:11s}] n={len(idx):2d}  mu={bg[1]:+.4f}  tau={bg[2]:.4f}")
+        print(f"  режим расщепления: {SEG_SPLIT}")
+
     # ---------------- A1: ЭМПИРИЧЕСКИЙ БАЙЕС ПРИОРА МОДЕЛЬНОГО СЕМЕЙСТВА ----------------
     eb_model = None
     prior_model_used = PRIOR_MODEL
@@ -299,8 +353,13 @@ def main() -> None:
           f"tau={prior_model_used[1]:.5f}")
 
     PRIORS = {"model": prior_model_used, "segment": (MU_SEG, TAU_SEG), "decomp": PRIOR_DECOMP}
-    mu_vec = np.array([PRIORS[AX[k]["fam"]][0] for k in names])
-    tau_vec = np.array([PRIORS[AX[k]["fam"]][1] for k in names])
+
+    def prior_of(k):
+        if AX[k]["fam"] == "segment" and k in SEG_PRIOR:
+            return SEG_PRIOR[k]
+        return PRIORS[AX[k]["fam"]]
+    mu_vec = np.array([prior_of(k)[0] for k in names])
+    tau_vec = np.array([prior_of(k)[1] for k in names])
     w_vec = np.array([tau_vec[i] ** 2 / (tau_vec[i] ** 2 + sig[k] ** 2)
                       for i, k in enumerate(names)])
 
@@ -417,7 +476,7 @@ def main() -> None:
         f8_mean=m(f8), f8_sd=float(np.std(f8)),
         verdict=verdict, lp_path=str(SCRATCH / f"F8_k1b_lp{TAG}.npy"),
         prior_model_used=list(prior_model_used), prior_model_registry=list(PRIOR_MODEL),
-        eb_model=eb_model,
+        eb_model=eb_model, seg_split=SEG_SPLIT, seg_split_info=seg_split_info,
     )
     (OUT / f"k1b_result{TAG}.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print(f"итоги: {OUT/f'k1b_result{TAG}.json'}")
@@ -476,7 +535,8 @@ def main() -> None:
         gain_priv_vs_F7=gain_f, gain_priv_sd=sd_f, gain_in_noise=gain_f / NOISE,
         pub_pred_algebra=pub_f, f8_mean=m(f8f), f8_sd=float(np.std(f8f)), f8_clips=nclip_f,
         lp_path=str(SCRATCH / f"F8_final_lp{TAG}.npy"), vs_F8=cmp,
-        eb_model=eb_model), ensure_ascii=False, indent=1))
+        eb_model=eb_model, seg_split=SEG_SPLIT, seg_split_info=seg_split_info,
+        mu_seg=MU_SEG, tau_seg=TAU_SEG), ensure_ascii=False, indent=1))
     print(f"  json: {OUT/f'k1b_final{TAG}.json'}")
 
 
@@ -488,21 +548,24 @@ if __name__ == "__main__":
     ap.add_argument("--eb-model", action="store_true", help="считать EB модельного приора")
     ap.add_argument("--eb-apply", action="store_true", help="подставить EB-оценку в приор")
     ap.add_argument("--eb-mu", type=float, default=None, help="зафиксировать mu приора")
-    ap.add_argument("--prior-decomp", default=None,
-                    help="EB-Z: MU,TAU приора Z-семейства (по умолчанию реестровый 0.0,0.0148)")
     ap.add_argument("--gamma", type=float, default=None, help=": gamma гребня")
     ap.add_argument("--tag", default="", help="суффикс выходных файлов")
+    ap.add_argument("--seg-split", default="", choices=["", "4", "3", "silent"],
+                    help="EB-SEG: расщепить сегментный приор по подгруппам")
+    ap.add_argument("--prior-decomp", default=None,
+                    help="MU,TAU приора Z-разложения (реестр 0.0,0.0148)")
     a = ap.parse_args()
-    if a.prior_model:
-        mu_, tau_ = (float(x) for x in a.prior_model.split(","))
-        PRIOR_MODEL = (mu_, tau_)
     if a.prior_decomp:
         mu_, tau_ = (float(x) for x in a.prior_decomp.split(","))
         PRIOR_DECOMP = (mu_, tau_)
+    if a.prior_model:
+        mu_, tau_ = (float(x) for x in a.prior_model.split(","))
+        PRIOR_MODEL = (mu_, tau_)
     EB_MODEL = a.eb_model or a.eb_apply
     EB_APPLY = a.eb_apply
     EB_MU_FIX = a.eb_mu
     TAG = a.tag
+    SEG_SPLIT = a.seg_split
     if a.gamma is not None:
         GAMMA_STAR = a.gamma
     main()

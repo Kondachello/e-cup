@@ -577,12 +577,17 @@ if __name__ == "__main__":
     ap.add_argument("--keep-n1", action="store_true", help=": не исключать mdl_wulfen")
     ap.add_argument("--no-center-ext", action="store_true",
                     help=": не центрировать досыпанные направления")
+    ap.add_argument("--prior-decomp", default=None,
+                    help="EB-Z: MU,TAU приора Z-семейства")
     ap.add_argument("--eb-decomp", action="store_true",
                     help=": применить EB-оценку decomp-приора")
     a = ap.parse_args()
     if a.prior_model:
         mu_, tau_ = (float(x) for x in a.prior_model.split(","))
         PRIOR_MODEL = (mu_, tau_)
+    if a.prior_decomp:
+        mu_, tau_ = (float(x) for x in a.prior_decomp.split(","))
+        PRIOR_DECOMP = (mu_, tau_)
     EXTEND = a.extend
     KEEP_N1 = a.keep_n1
     CENTER_EXT = not a.no_center_ext
