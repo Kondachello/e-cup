@@ -67,3 +67,8 @@ from_sasha/
 
 # кэш признаков erafix (1.5 ГБ, пересобирается v1b_run_local за ~20 мин)
 work/zhenya_eda/out/erafix_feat.npz
+
+# тяжёлые переносные артефакты кампании 29.08 (в git не идут, лежат локально/на Kaggle)
+ozon_kevf_ckpt.zip
+sasha2_jf_package.zip
+work/data/kaggle_session3/
