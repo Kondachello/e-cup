@@ -24,14 +24,20 @@
 Для выбора финалистов верна SPLIT: юзеры уже даны, разыгрывается только раскол.
 
 Режимы:
-  --calibrate            (локально) проверка на известной паре + кривая σ_d(непохожесть)
+  --calibrate            (локально) проверка на известной паре + кривая σ_d(непохожесть).
+                         ВНИМАНИЕ: перезаписывает work/reports/final_pair_calibration.json
+                         (этот же режим включается, если запустить БЕЗ аргументов).
+                         σ_d = k·rms по сохранённой калибровке, ожидания — E[priv] из
+                         реестра finalist_guard.FINALISTS (или --scores SA SB).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -138,18 +144,125 @@ def calibrate(scratch: Path, B: int):
     return k, ref["split"], rms
 
 
+def _scratch_dir() -> Path:
+    """Каталог для временных файлов: переменная окружения, иначе системный tmp.
+
+    Раньше здесь был зашит скретчпад чужой машины (/tmp/claude-1000/-home-olya-...),
+    из-за чего скрипт мусорил в несуществующий путь на любой другой машине.
+    """
+    env = os.environ.get("OZON_SCRATCH") or os.environ.get("CLAUDE_SCRATCHPAD")
+    p = Path(env) if env else Path(tempfile.gettempdir()) / "ozon_final_pair"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _resolve_sub(fn: str) -> Path:
+    """Путь как есть, иначе submissions/<имя> (можно передавать одно имя файла)."""
+    p = Path(fn)
+    if p.exists():
+        return p
+    for cand in (ROOT / "submissions" / p.name, ROOT / "submissions" / f"{p.name}.csv"):
+        if cand.exists():
+            return cand
+    return p
+
+
+def _read_lp(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """(user_id, log1p(predict)) отсортировано — та же шкала, в которой калибрована σ_d."""
+    d = pl.read_csv(path, schema_overrides={"user_id": pl.Int64}).sort("user_id")
+    col = "predict" if "predict" in d.columns else d.columns[1]
+    return (d["user_id"].to_numpy(),
+            np.log1p(np.clip(d[col].to_numpy().astype(np.float64), 0, None)))
+
+
+def _k_from_calibration() -> tuple[float, str]:
+    """σ_d ≈ k·rms — коэффициент из сохранённой калибровки (--calibrate)."""
+    f = REPORTS_DIR / "final_pair_calibration.json"
+    if f.exists():
+        j = json.loads(f.read_text())
+        return float(j["k_sigma_per_rms"]), str(f)
+    return float("nan"), "нет — прогони --calibrate"
+
+
+def _expectations(names: list[str], scores: list[float] | None) -> tuple[list[float], str]:
+    """Ожидаемые ПРИВАТНЫЕ скоры пары. Валюта штаба — finalist_guard.private_ev."""
+    if scores:
+        return list(scores), "заданы вручную (--scores)"
+    try:
+        import finalist_guard as G
+        evs, src = [], []
+        for n in names:
+            rec = G.FINALISTS.get(n)
+            if rec is None:
+                raise KeyError(n)
+            evs.append(G.private_ev(rec["pub"], rec["k"]))
+            src.append(f"{n}: pub {rec['pub']:.7f}, k {rec['k']}")
+        return evs, "E[priv] по реестру finalist_guard (" + "; ".join(src) + ")"
+    except Exception:
+        pass
+    try:
+        import predict_lb as P
+        known = {n: s for n, _, s in P.MEASURED}
+        return [known[n] for n in names], "публичные скоры из predict_lb.MEASURED (не E[priv]!)"
+    except Exception as e:
+        raise SystemExit(f"нет ожиданий для пары ({e}) — задай --scores SA SB")
+
+
+def decide_pair(pa: Path, pb: Path, scores: list[float] | None):
+    """Решение по конкретной паре: σ_d из непохожести, ценность второго слота."""
+    if not pa.exists() or not pb.exists():
+        print("режим пары требует самих файлов сабмитов "
+              f"(нет: {', '.join(str(p) for p in (pa, pb) if not p.exists())}).")
+        return 1
+    ua, la = _read_lp(pa)
+    ub, lb = _read_lp(pb)
+    if not np.array_equal(ua, ub):
+        print("ОТКАЗ: user_id файлов не совпадают — пара несравнима.")
+        return 1
+    names = [pa.stem, pb.stem]
+    ev, ev_src = _expectations(names, scores)
+    k, k_src = _k_from_calibration()
+    rms = float(np.sqrt(np.mean((la - lb) ** 2)))
+    sd = k * rms
+
+    print("--- РЕШЕНИЕ ПО ПАРЕ ---")
+    print(f"файлы: {names[0]} (слот 1) и {names[1]} (слот 2), n = {len(ua)}")
+    print(f"ожидания: {ev_src}")
+    print(f"  E[{names[0]}] = {ev[0]:.7f}   E[{names[1]}] = {ev[1]:.7f}")
+    lead = 0 if ev[0] <= ev[1] else 1
+    D = abs(ev[1] - ev[0])
+    print(f"ведёт {names[lead]}, отставание второго D = {D:.7f}")
+    print(f"непохожесть rms(log1p) = {rms:.5f}")
+    print(f"σ_d ≈ {k:.6f}·rms = {sd:.3e}   (калибровка: {k_src})")
+
+    sv = slot_value(D, sd)
+    pi = p_inversion(D, sd)
+    print(f"\nценность второго слота E[max]−E[] = {sv:.3e}")
+    print(f"вероятность инверсии на привате p = {pi:.2e}   (z = D/σ_d = {D/sd:.1f})")
+    print(f"порог осмысленности — шум замера {NOISE:.6f}")
+    print(f"E[зачёт] ≈ {ev[lead] - sv:.7f} против {ev[lead]:.7f} у одного ведущего файла")
+    print("\nВЕРДИКТ: " + (
+        f"второй слот окупается ({sv:.3e} > шума {NOISE:.6f}) — пара оправдана"
+        if sv > NOISE else
+        f"второй слот ниже шума замера ({sv:.3e} ≤ {NOISE:.6f}): страховка почти "
+        f"бесплатна, но и почти бесполезна — слот всё равно занимаем лучшим законным файлом"))
+    print("ОГОВОРКА: σ_d — только разброс раскола публика/приват. Ошибка самой модели "
+          "ожиданий (k в валюте штаба) в него НЕ входит; страховка второго слота живёт "
+          "именно за счёт неё, а не за счёт σ_d.")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--calibrate", action="store_true")
     ap.add_argument("--pair", nargs=2, metavar=("A", "B"))
     ap.add_argument("--scores", nargs=2, type=float, metavar=("SA", "SB"),
-                    help="публичные скоры пары, если известны (для D)")
+                    help="ожидаемые скоры пары, если известны (для D); "
+                         "по умолчанию берутся E[priv] из реестра finalist_guard")
     ap.add_argument("-B", type=int, default=B_DEFAULT)
     args = ap.parse_args()
 
-    scratch = Path("/tmp/claude-1000/-home-olya-ozon-cup/"
-                   "3410b186-4f1d-4097-b46c-9fd918faacc8/scratchpad")
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = _scratch_dir()
 
     if args.calibrate or not args.pair:
         k, sd_known, rms_known = calibrate(scratch, args.B)
@@ -181,7 +294,7 @@ def main():
         print("Два финалиста, отличающиеся цепочкой поправок, лежат СИЛЬНО ниже этого.")
         return
 
-    print("режим пары требует самих файлов сабмитов (submissions/ здесь нет).")
+    sys.exit(decide_pair(_resolve_sub(args.pair[0]), _resolve_sub(args.pair[1]), args.scores))
 
 
 if __name__ == "__main__":
