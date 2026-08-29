@@ -605,3 +605,21 @@ bagged_champ8_cal	1.670196	binned log-shift calibration of bagged_champ8; holdou
 c_ts2_s42	1.692342	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io
 behavonly	1.712425	ретрейн 27.08: восстановление весов+меты для пакета сдачи (провенанс-долг §1); оригинал обучен до model_io
 ktpp_cal	1.671065	binned log-shift calibration of ktpp; holdout 1.682562->1.671259
+weak_an_d_fz	1.695393	weak/anchors k=4 sel_seed=77; 203 feats
+weak_ft_recency_fz	1.730688	weak/ftype ftype=recency; 21 feats
+c_ts2_s42_fz	1.696260	lgb/two_stage
+febspec2_fz	1.785259	short<=42d tier (93 feats, funnel=False) lgb_tw145_nofun; 39 weekly anchors from 2025-02-17 cohort 20%; gap30; iters from held-out anchors (698)
+lagfz0	1.679469	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2026-01-14
+lagfz14	1.715825	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-31
+lagfz28	1.745023	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-17
+lagfz42	1.767829	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-12-03
+lagfz56	1.791567	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-11-19
+lagfz70	1.807626	lag-TTA tweedie cut2025-11-04 n9 it=655; features at 2025-11-05
+weak_an_d_fz_cal	1.672794	binned log-shift calibration of weak_an_d_fz; holdout 1.696216->1.673505
+weak_ft_recency_fz_cal	1.701313	binned log-shift calibration of weak_ft_recency_fz; holdout 1.731657->1.702014
+c_ts2_s42_fz_cal	1.668328	binned log-shift calibration of c_ts2_s42_fz; holdout 1.696623->1.668819
+febspec2_fz_cal	1.770665	binned log-shift calibration of febspec2_fz; holdout 1.782185->1.768060
+RETRAIN_FREEZE	-	Ретрейн заморозки 28.08 на составе из 18 членов: переобучено 7.8% веса (покрытие упало с 20.5% — GPU-секвенсы забрали половину состава), сдвиг решения +0.000080 = 3.6 шума. Все четыре табличные воспроизвели свои прогоны 25.08 до знака после отвязки якорей от каталога. Расхождение lagd28 (+0.000448) — разница протоколов n18 против n9, а не невоспроизводимость
+MAX_BACK_409	-	MAX_BACK 379->409: исправленные признаки тестового якоря собраны (mb409, три тира), сдвиг замерен. weak_an_d sd 0.0354, weak_ft_recency sd 0.1134, behavonly sd 0.0242. Сдвиг итогового файла по покрытым 0.093 веса: среднее -0.000744, sd 0.003719, у 2.26% юзеров >0.01 — примерно 1/7 типичного шага цепочки. Улучшает ли — замером не определяется (на тесте меток нет), три четверти цены уже выкуплены пробой mdl_halite. Побочно: mb_fix_infer искал меты только в work/models и пропускал всё
+FINAL_PAIR_SET	-	Пара финалистов зафиксирована и отмечена Final: F3_priv (1.6466359, E[priv] +0.000333) + F4_priv (1.6468219, +0.000254). guard --pair на самих CSV: пара годна. Урок: неверная оценка обязана удаляться из ранжирования, иначе guard вечно советует вытесненный файл
+FINAL_PAIR_F5	-	Пара обновлена: F5_priv (1.6462976, E[priv] +0.000923) + F4_priv (1.6468219, +0.000254), guard --pair на самих CSV — годна. F3_priv вытеснен из первого слота штатно. Впервые лидер видимой выборки и лидер приватной EV — один файл; до сих пор расходились (R9_zharv2 вёл по паблику при отрицательном приватном ожидании)

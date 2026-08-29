@@ -19,6 +19,19 @@ sys.path.insert(0, str(Path(__file__).parent))
 from common import FEATURES_DIR, REPORTS_DIR, TEST_ANCHOR, WORK
 
 MODELS = WORK / "models"
+# Артефакты живут в ДВУХ местах: рабочем каталоге и упакованном пакете сдачи. Искать
+# только в первом — тот же дефект, что был в pack_models.py: 28.08 этот скрипт пропустил
+# ВСЕ модели с «нет meta», хотя шесть мет лежали в final_submission/models.
+PKG_MODELS = WORK.parent / "final_submission" / "models"
+
+
+def find_artifact(fname: str):
+    """Файл артефакта: сначала пакет (он канонический), потом рабочий каталог."""
+    for d in (PKG_MODELS, MODELS):
+        p = d / fname
+        if p.exists():
+            return p
+    return None
 A = TEST_ANCHOR.isoformat()
 MB = 409
 
@@ -52,7 +65,10 @@ def mat(df: pl.DataFrame, cols: list[str]) -> np.ndarray:
 
 def lgb_booster(stem: str):
     import lightgbm as lgb
-    return lgb.Booster(model_file=str(MODELS / f"{stem}.txt"))
+    p = find_artifact(f"{stem}.txt")
+    if p is None:
+        raise FileNotFoundError(f"нет весов {stem}.txt ни в пакете, ни в work/models")
+    return lgb.Booster(model_file=str(p))
 
 
 def gbdt_predict(meta: dict, name: str, X: np.ndarray) -> np.ndarray:
@@ -78,8 +94,8 @@ def main() -> None:
 
     todo = [(n, None) for n in LGB_MODELS] + [(n, v) for n, v in MULTIHEAD.items()]
     for name, multi in todo:
-        mp = MODELS / f"{name}_meta.json"
-        if not mp.exists():
+        mp = find_artifact(f"{name}_meta.json")
+        if mp is None:
             print(f"{name:22s} нет meta — пропуск")
             continue
         meta = json.loads(mp.read_text())

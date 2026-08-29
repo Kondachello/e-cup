@@ -28,38 +28,45 @@ python final_submission/inference.py --stage check
 | `NAME__TAG.txt` | бустер LightGBM подмодели TAG (`__stage1`/`__stage2`, `__count`/`__aov`) | `model_io.save_lgb()` |
 | `NAME.xgb.json` | бустер XGBoost | `model_io.save_xgb()` |
 | `NAME_cal.npz` | поквантильная калибровка: `centers`, `shifts` | `calibrate.py` |
-| `chain_test.npz` | замороженная цепочка (см. ниже) | `inference.py --stage freeze` |
+| `chain_test.npz` | оценённая цепочка поправок (см. ниже) | `inference.py --stage freeze` |
 | `silence_p_test.npz` | вероятность молчания для 250 000 (кэш шага 6) | `inference.py --stage silence` |
 | `preds_test/` | кэш стадии `predict` | `inference.py` |
 
-## Что ожидается для 25 базовых моделей
+## Что ожидается для действующего состава
 
-25 базовых моделей складываются в 20 членов бленда (три семейства усредняются по сидам).
-Полная таблица весов — `../reproduce_training.md` §5.
+Бленд — 14 членов; часть семейств усредняется по сидам, поэтому базовых моделей больше.
+Полная таблица весов — `../README.md` §4.
 
-| базовая модель | веса | воспроизводимость |
-|---|---|---|
-| `mlpziln_c42`, `mlpziln_c1337`, `mlpziln_c7` | `NAME_seed{S}.pt` + `NAME_stats.npz` | веса сохраняются |
-| `c_ts2_s42`, `c_ts2_s7` | `NAME__stage1.txt`, `NAME__stage2.txt` | веса сохраняются |
-| `behavonly`, `behavonly_s1337`, `behavonly_s7` | `NAME.txt` | веса сохраняются |
-| `weak_an_d`, `weak_ft_recency`, `weak_ft_counts`, `weak_ft_long90` | `NAME.txt` | веса сохраняются |
-| `twl_v7` | `twl_v7.txt` | веса сохраняются |
-| `countaov_s7` | `countaov_s7__count.txt`, `countaov_s7__aov.txt` | веса сохраняются |
-| `c_xtw_s42` | `c_xtw_s42.xgb.json` | веса сохраняются |
-| `seq2tr_f` | `seq2tr_f_seed{42,1337}.pt` | веса сохраняются, но тензоры `work/seq2` удалены |
-| `fusion_v3c42`, `fusion_v3c555`, `fusion_v3c7`, `fusion_v3`, `fusion_v3ctl` | — | **весов нет: `train_fusion3.py` не вызывает `model_io`** |
-| `wklin`, `wklin_wk` | — | **весов нет: `train_wklin.py` не вызывает `model_io`** |
-| `febspec2` | — | **весов нет: `train_febspec2.py` не вызывает `model_io`** |
-| `hmmsim` | — | **весов нет по построению** (см. ниже) |
+| базовая модель | вес в бленде | веса | воспроизводимость |
+|---|---|---|---|
+| `kostya46` | 0.246 | `NAME.txt` | трек №3, обучается на своей машине (`work_kostya/`) |
+| `fusion_v3c42`, `fusion_v3c555`, `fusion_v3c7` | 0.229 | `NAME_seed{S}.pt` | сохраняются (`save_torch`, фазы p1/p2) |
+| `gseq_small_s42` | 0.109 | — | трек №5, GPU (`work/colab/gpu_seq.py`) |
+| `fusion_v3ctl` | 0.106 | `NAME_seed{S}.pt` | сохраняются |
+| `wklin`, `wklin_wk` | 0.074 | `NAME_{val,test}.npz` | сохраняются (`save_npz`: вектор `[beta, intercept]`) |
+| `weak_an_d`, `weak_ft_recency` | 0.089 | `NAME.txt` | сохраняются |
+| `behavonly`, `behavonly_s1337`, `behavonly_s7` | 0.041 | `NAME.txt` | сохраняются |
+| `lagd28` | 0.035 | `NAME__tw.txt` | сохраняются (`save_lgb`, обе половины) |
+| `c_ts2_s42` | 0.033 | `NAME__stage1.txt`, `NAME__stage2.txt` | сохраняются |
+| `gseq_big_s42` | 0.024 | — | трек №5, GPU |
+| `fusion_f` | 0.011 | `NAME_seed{S}.pt` | сохраняются |
+| `febspec2` | 0.009 | `NAME__{val,test}.txt` | сохраняются (`save_lgb`) |
 
 Плюс `NAME_meta.json` у каждой модели, которая сохраняет веса, и `NAME_cal.npz` у каждого
-калиброванного члена бленда.
+калиброванного члена.
 
-Для четырёх последних групп артефактом является сам прогноз
-`work/preds/NAME_test.parquet`, и другого способа получить его, кроме повторного
-обучения, нет.
+**Несохраняющих трейнеров в действующем составе не осталось.** `train_wklin.py`,
+`train_febspec2.py` и `lag_tta.py` научены сохранять 24–25.08; `train_fusion3.py` сохранял
+и раньше — прежняя запись «весов нет, трейнер не вызывает `model_io`» была неверной и
+касалась артефактов, собранных ДО появления сохранения. Проверка — `inference.py
+--stage check`: он определяет причину отсутствия, читая трейнер, а не предполагая.
 
-`hmmsim` — генеративный симулятор: скрытая марковская модель оценивается EM по
+Модели треков №3 и №5 (суммарный вес 0.379) обучаются на своих машинах; их код лежит в
+репозитории (`work_kostya/`, `work/colab/`), веса передаются отдельным архивом.
+
+
+`hmmsim` (в действующем составе вес 0, механизм описан ради контракта `stateless`) —
+генеративный симулятор: скрытая марковская модель оценивается EM по
 собственной истории каждого пользователя и таргет не видит вообще, поэтому обучаемых
 весов у неё нет. `hmmsim_meta.json` помечен `"stateless": true` и хранит гиперпараметры;
 инференс при отсутствии готового прогноза пересчитывает симулятор с тем же сидом (~6 мин).
@@ -84,9 +91,30 @@ python final_submission/inference.py --stage check
 * `BLEND_WEIGHTS` — 20 весов, источник `work/reports/blend_reopt.json`, ключ `winner`
   (библиотека `B_plus_cal`, метод `ridge_free`, `alpha_rel` 1e-4). Сверка с текущим
   отчётом: `inference.py --stage check --verify-blend`;
-* `REF_MEAN = 2.324718…`, `REF_SD = 1.632001…` — моменты log1p, замеренные на лидерборде;
+* `REF_MEAN = 2.324718…`, `REF_SD = 1.632001…` — моменты log1p, оценённые для целевого окна;
 * `STEP = 0.469` — сила шага от опорного файла к новому кандидату;
 * `Q_REF = 0.0027149`, `P_LEVEL = 0.030843`, `A_OLD = 0.894`, `A_NEW = 0.65` — поправка на
   молчащих.
 
 Что означает каждое число и откуда взято — `../reproduce_training.md` §6 и §7.
+
+## Упаковка: только по составу, никаких подстановочных шаблонов
+
+```bash
+python final_submission/pack_models.py           # проверить
+python final_submission/pack_models.py --apply   # скопировать недостающее из work/models
+python final_submission/pack_models.py --prune   # убрать лишнее (переносит, не удаляет)
+```
+
+Скрипт идёт от `MEMBER_PARTS` и `BLEND_WEIGHTS` в `inference.py` и копирует ровно то, что
+нужно четырнадцати членам. Копировать шаблоном (`cp work/models/*_cal.npz .`) НЕЛЬЗЯ:
+26.08 так и сделали, и в каталог затекли восемь посторонних файлов — калибровки
+переобучений `*_rt_cal`, сид-3 модели трека №3, а также `tfm3b_cal` и `tfmb28_cal`
+моделей, которых в решении нет вовсе. В git они не попали, но уехали бы при упаковке
+каталога; убраны 27.08.
+
+**Текущее состояние.** Все 20 требуемых файлов на месте: 12 таблиц калибровки и веса тех
+моделей, чья `meta.json` упакована. Но у **14 базовых моделей из 17 `meta.json` нет**, и
+без неё не проверить, какие файлы весов им нужны — метаданные есть только у `weak_an_d`,
+`weak_ft_recency`, `behavonly_s1337` и `behavonly_s7`. Это первое, что нужно дособрать:
+`work/models/*_meta.json` весят килобайты, а без них состав пакета непроверяем.

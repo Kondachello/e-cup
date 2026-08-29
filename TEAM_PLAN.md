@@ -215,7 +215,7 @@ AUC 0.6482, а добавление ещё 54 признаков любого с
 
 ```bash
 git clone git@github.com:Kondachello/ozon_cup.git && cd ozon_cup
-python3.10 -m venv .venv && .venv/bin/pip install -r solution_lbmix2/requirements.txt lifetimes torch
+python3.10 -m venv .venv && .venv/bin/pip install -r final_submission/requirements.txt
 # положить train.parquet и sample_submit.csv в корень
 .venv/bin/python work/scripts/build_features.py --preset all
 .venv/bin/python work/scripts/build_features_v2.py
