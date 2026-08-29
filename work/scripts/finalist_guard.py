@@ -86,37 +86,67 @@ FINALISTS: dict[str, dict] = {
 }
 
 # Точка расширения под возможную поправку доктрины. БЕЗ явного флага --allow-show-slot2
-# И БЕЗ коммита-поправки в репозитории витрина остаётся запрещённой ВСЕГДА.
-# Чтобы поправка считалась принятой, в истории ветки должен быть коммит, чьё сообщение
-# содержит этот маркер (гард сам ничего не коммитит и не снимает бан молча).
-DOCTRINE_MARKER = "ДОКТРИНА-ПОПРАВКА: SHOW-СЛОТ-2"
+# И БЕЗ поправки-файла в репозитории витрина остаётся запрещённой ВСЕГДА.
+#
+# Поправка — это ОТСЛЕЖИВАЕМЫЙ git-ом файл AMENDMENT_PATH, в котором Саша поимённо
+# разрешает ОДНУ конкретную витрину во втором слоте. Гард сам ничего не коммитит и
+# бан молча не снимает.
+#
+# Почему не поиск маркера по сообщениям коммитов (как было в первой редакции):
+# `git log --all --grep=…` смотрит ВСЕ ветки, включая чужие (zhenya/kostet/olya).
+# Любой коммит любого участника, ОПИСЫВАЮЩИЙ поправку, включал бы обход бана. Файл
+# в рабочем дереве, отслеживаемый git-ом, так сработать не может, а как аудиторский
+# след он строго лучше: его видно в diff и он предъявим жюри.
+AMENDMENT_PATH = ROOT / "work" / "reports" / "DOCTRINE_AMENDMENT_SHOW_SLOT2.md"
+AMENDMENT_SIGN = "РАЗРЕШАЮ ВО ВТОРОМ СЛОТЕ:"
 
 
-def doctrine_amendment() -> str | None:
-    """Коммит-поправка доктрины (маркер DOCTRINE_MARKER) или None, если её нет."""
+def doctrine_amendment() -> tuple[str, set[str]] | None:
+    """Принятая поправка доктрины: (описание, множество поимённо разрешённых витрин).
+
+    Возвращает None, если поправки нет. Требования, все обязательны:
+      1. файл AMENDMENT_PATH существует;
+      2. он ОТСЛЕЖИВАЕТСЯ git-ом (git ls-files) — черновик в рабочем дереве не считается;
+      3. в нём есть строка `РАЗРЕШАЮ ВО ВТОРОМ СЛОТЕ: <имя_файла>` с непустым именем.
+    """
+    if not AMENDMENT_PATH.exists():
+        return None
     try:
-        r = subprocess.run(["git", "log", "--all", f"--grep={DOCTRINE_MARKER}",
-                            "--format=%h %s", "-n", "1"],
+        r = subprocess.run(["git", "ls-files", "--error-unmatch", str(AMENDMENT_PATH)],
                            cwd=ROOT, capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            return None
     except Exception:
         return None
-    line = r.stdout.strip().splitlines()
-    return line[0] if line else None
+    allowed: set[str] = set()
+    for line in AMENDMENT_PATH.read_text(encoding="utf-8").splitlines():
+        if AMENDMENT_SIGN in line:
+            name = line.split(AMENDMENT_SIGN, 1)[1].strip().strip("`*_ ")
+            if name.endswith(".csv"):
+                name = name[:-4]
+            if name:
+                allowed.add(name)
+    if not allowed:
+        return None
+    return (f"{AMENDMENT_PATH.relative_to(ROOT)} (разрешено поимённо: "
+            f"{', '.join(sorted(allowed))})", allowed)
 
 
 def banned(name: str, *, slot: int | None = None, allow_show_slot2: bool = False,
-           amendment: str | None = None) -> bool:
+           amendment: tuple[str, set[str]] | None = None) -> bool:
     """Запрещён ли файл как финалист.
 
     По умолчанию (banned(name)) — поведение прежнее: любой из BANNED_PATTERNS запрещает.
     Витрина (^SHOW и только она) может быть допущена ТОЛЬКО при одновременном:
-    slot == 2, явном allow_show_slot2 и наличии коммита-поправки доктрины.
+    slot == 2, явном allow_show_slot2, наличии принятой поправки доктрины И упоминании
+    этого файла в поправке ПОИМЁННО. Одна поправка открывает одну витрину, а не класс.
     Файлы, попавшие ещё и под _maxpub/_aggr, не допускаются никогда.
     """
     hits = [p for p in BANNED_PATTERNS if re.search(p, name)]
     if not hits:
         return False
-    if hits == [SHOW_PATTERN] and allow_show_slot2 and slot == 2 and amendment:
+    if (hits == [SHOW_PATTERN] and allow_show_slot2 and slot == 2
+            and amendment is not None and name in amendment[1]):
         return False
     return True
 
@@ -240,8 +270,9 @@ def main():
                          "(по умолчанию из реестра FINALISTS)")
     ap.add_argument("--allow-show-slot2", action="store_true",
                     help="ТОЧКА РАСШИРЕНИЯ, по умолчанию ВЫКЛЮЧЕНА: допустить витрину "
-                         "(^SHOW) во ВТОРОЙ слот — и только при наличии коммита-поправки "
-                         f"доктрины с маркером «{DOCTRINE_MARKER}»")
+                         "(^SHOW) во ВТОРОЙ слот — и только при наличии поправки доктрины "
+                         f"в отслеживаемом файле {AMENDMENT_PATH.name}, где витрина "
+                         "разрешена ПОИМЁННО")
     a = ap.parse_args()
 
     amendment = None
@@ -249,11 +280,13 @@ def main():
         amendment = doctrine_amendment()
         print("*** ЗАПРОШЕНО СНЯТИЕ БАНА ВИТРИНЫ ВО ВТОРОМ СЛОТЕ (--allow-show-slot2) ***")
         if amendment:
-            print(f"    коммит-поправка доктрины найден: {amendment}")
-            print("    витрина допускается ТОЛЬКО во второй слот; в первом — по-прежнему бан.")
+            print(f"    поправка доктрины принята: {amendment[0]}")
+            print("    витрина допускается ТОЛЬКО во второй слот и ТОЛЬКО поимённо; "
+                  "в первом слоте — по-прежнему бан.")
         else:
-            print(f"    коммита-поправки с маркером «{DOCTRINE_MARKER}» в репозитории НЕТ "
-                  f"— флаг НЕ ДЕЙСТВУЕТ, бан ^SHOW в силе.")
+            print(f"    поправки нет: нужен отслеживаемый git-ом файл "
+                  f"{AMENDMENT_PATH.relative_to(ROOT)} со строкой "
+                  f"«{AMENDMENT_SIGN} <имя_файла>» — флаг НЕ ДЕЙСТВУЕТ, бан ^SHOW в силе.")
         print()
 
     report_auto()
