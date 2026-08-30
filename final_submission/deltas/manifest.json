@@ -19,5 +19,13 @@
     "n": 250000,
     "sha256_submitted": "6b905c2d5d3818aef15daf192f5aabbb23898dc12546639f5e031c9d040f2d8f",
     "sha256_assembled": "6b905c2d5d3818aef15daf192f5aabbb23898dc12546639f5e031c9d040f2d8f"
+  },
+  "F13_g0": {
+    "slot": 4,
+    "relative_to": "F12_ebint",
+    "max_abs_err": 1.734723475976807e-18,
+    "n": 250000,
+    "sha256_submitted": "ebf7883a46ed6ecee3eca8080ff4d9f9e1180c65b6e34a99887f7c64c12d7626",
+    "sha256_assembled": "355523b50f0041f4272acf4a5f88494376fe3d93f2bcdacaed8b0f39f527d0d4"
   }
 }

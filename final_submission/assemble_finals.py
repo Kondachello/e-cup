@@ -8,6 +8,12 @@
 она получена. Сборка детерминирована: веса и направления заморожены, скрипт их
 применяет, а не подбирает.
 
+Поправка задаётся либо от базы (по умолчанию), либо от другого уже собранного
+кандидата — тогда в манифесте стоит `relative_to`. Так задан `F13_g0`: он строится
+как `F12_ebint` плюс поправка, потому что это тот же приор при γ=0, и разность
+двух файлов представима в float64 точнее, чем каждый из них по отдельности от базы.
+Скрипт сам раскладывает записи в порядке зависимостей.
+
 Сверка двойная. Основная — по значениям: максимум модуля разности против
 манифеста, порог TOL. Дополнительная — sha256 собранного файла против
 sha256_assembled; она проходит только на той же версии polars, потому что
@@ -37,6 +43,21 @@ def load_base(path: Path):
     return d["user_id"].to_numpy(), d[col].to_numpy().astype(np.float64)
 
 
+def order(man: dict) -> list[tuple[str, dict]]:
+    """Записи в порядке зависимостей: `relative_to` собирается раньше потомка."""
+    done, rest, out = set(), sorted(man.items(), key=lambda kv: kv[1]["slot"]), []
+    while rest:
+        ready = [(n, r) for n, r in rest
+                 if not r.get("relative_to") or r["relative_to"] in done]
+        if not ready:
+            raise SystemExit("манифест: цикл или недостающая ссылка в relative_to: "
+                             + ", ".join(n for n, _ in rest))
+        out += ready
+        done |= {n for n, _ in ready}
+        rest = [(n, r) for n, r in rest if n not in done]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True, help="CSV, собранный inference.py")
@@ -49,11 +70,14 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ok = True
-    for name, rec in sorted(man.items(), key=lambda kv: kv[1]["slot"]):
+    built: dict[str, np.ndarray] = {}
+    for name, rec in order(man):
         z = np.load(DELTAS / f"delta_{rec['slot']}.npz")
         if not np.array_equal(z["user_id"], uid):
             raise SystemExit(f"{name}: юниверс базы не совпал с юниверсом поправки")
-        pred = base + z["delta"]
+        parent = rec.get("relative_to")
+        pred = (built[parent] if parent else base) + z["delta"]
+        built[name] = pred
         out = out_dir / f"{name}.csv"
         pl.DataFrame({"user_id": uid, "predict": pred}).write_csv(out)
 
