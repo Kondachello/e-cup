@@ -43,5 +43,13 @@
     "n": 250000,
     "sha256_submitted": "c21befce33025ccb547560bba03ba15196d00878a8c42c66d9ffb8f71a51ab7a",
     "sha256_assembled": "c206b5a0639a8e4a47ae42a8e1e6934fccd1cd0edf56e2728e3a1b0388f7ea3e"
+  },
+  "F21_seg4g08": {
+    "slot": 7,
+    "relative_to": "F12_ebint",
+    "max_abs_err": 0.0,
+    "n": 250000,
+    "sha256_submitted": "cd5991350310d08b12891e0a80ae4a938c9715962f1df68c774dcd646942826e",
+    "sha256_assembled": "cd5991350310d08b12891e0a80ae4a938c9715962f1df68c774dcd646942826e"
   }
 }
