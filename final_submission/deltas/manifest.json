@@ -1,0 +1,23 @@
+{
+  "F8_priv": {
+    "slot": 1,
+    "max_abs_err": 1.7763568394002505e-15,
+    "n": 250000,
+    "sha256_submitted": "5eaaef9fd1dca1523017d92427aecdfdafa1e82b92946f6f3d957c9b7f4abf0f",
+    "sha256_assembled": "bd271fb700000e773071758da9f319ff91f0c646a1052f6fb806a1a2d321b629"
+  },
+  "T3_g1_redose_044": {
+    "slot": 2,
+    "max_abs_err": 5.551115123125783e-17,
+    "n": 250000,
+    "sha256_submitted": "39d5cd249302138a7299ce6beec5a3729c64c29af22d707785f1577feb656e72",
+    "sha256_assembled": "fc7651bfb7fe4fed074918836253af04075eaa58293c34be7979fb4bc268cff5"
+  },
+  "F12_ebint": {
+    "slot": 3,
+    "max_abs_err": 0.0,
+    "n": 250000,
+    "sha256_submitted": "6b905c2d5d3818aef15daf192f5aabbb23898dc12546639f5e031c9d040f2d8f",
+    "sha256_assembled": "6b905c2d5d3818aef15daf192f5aabbb23898dc12546639f5e031c9d040f2d8f"
+  }
+}
