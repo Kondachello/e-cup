@@ -415,7 +415,7 @@ def main() -> None:
         gain_priv_vs_F7=gn, gain_priv_sd=gs, gain_in_noise=gn / NOISE,
         pub_pred_algebra=pub_alg, pub_pred_lb=r8["pred"], pub_novelty=r8["novelty"],
         f8_mean=m(f8), f8_sd=float(np.std(f8)),
-        verdict=verdict, lp_path=str(SCRATCH / f"F8_k1b_lp{TAG}.npy"),
+        verdict=verdict,
         prior_model_used=list(prior_model_used), prior_model_registry=list(PRIOR_MODEL),
         eb_model=eb_model,
     )
@@ -474,8 +474,7 @@ def main() -> None:
         delta_doses={kn[j]: float(d_fin[j]) for j in range(len(kn))},
         doses_F8={kn[j]: float(bF7[kn[j]] + d_fin[j]) for j in range(len(kn))},
         gain_priv_vs_F7=gain_f, gain_priv_sd=sd_f, gain_in_noise=gain_f / NOISE,
-        pub_pred_algebra=pub_f, f8_mean=m(f8f), f8_sd=float(np.std(f8f)), f8_clips=nclip_f,
-        lp_path=str(SCRATCH / f"F8_final_lp{TAG}.npy"), vs_F8=cmp,
+        pub_pred_algebra=pub_f, f8_mean=m(f8f), f8_sd=float(np.std(f8f)), f8_clips=nclip_f, vs_F8=cmp,
         eb_model=eb_model), ensure_ascii=False, indent=1))
     print(f"  json: {OUT/f'k1b_final{TAG}.json'}")
 
