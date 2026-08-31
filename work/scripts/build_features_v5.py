@@ -8,10 +8,10 @@ a model's contribution to the blend is ~7.1*delta^2, where delta is the
 share of the model OUTSIDE the blend's linear hull, and the blend residual is NOT predictable
 from our 203 aggregate features. Only a representation that is not a function of that feature
 set can help. Screening found exactly one: the low-rank structure of the user x week matrix
-(work/scripts/screen_repr.py, work/scripts/screen_v5.py).
+(work/scripts/screen_repr.py, plus a driver that is not part of this package).
 
-Composition, chosen by screen_v5.py (out-of-sample R^2 of the blend residual, half the users
-fit / half measured, Gaussian placebo of the same width in parentheses):
+Composition, chosen by that screening (out-of-sample R^2 of the blend residual, half the
+users fit / half measured, Gaussian placebo of the same width in parentheses):
 
     sep 32 comps x 5 matrices, 54 weeks   dim 160   +0.001361 (-0.000934)
     sep 32 comps x 5 matrices, 36 weeks   dim 160   +0.000997 (-0.001223)

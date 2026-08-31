@@ -1,5 +1,0 @@
-без поправки   тест: mean 2.26451 sd 1.55866
-С ПОПРАВКОЙ    тест: mean 2.26446 sd 1.55868
-
-разность (сырая): mean -0.000049  sd 0.043058
-направление записано: /Users/alexanderkondakov/ozon-cup/work/zhenya_eda/out/dir_erafix.parquet q=0.002600, sd=0.05099

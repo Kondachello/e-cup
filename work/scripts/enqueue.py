@@ -31,20 +31,3 @@ if __name__ == "__main__":
         line = line.strip()
         if line:
             exec(line)
-
-
-def snapshot_submissions():
-    """Копирует канонические сабмиты в submissions/canonical, чтобы переименование
-    при заливке не ломало последующие расчёты (см. историю: файлы переименовывали 4 раза)."""
-    import shutil
-    from pathlib import Path
-    src = ROOT / "submissions"
-    dst = src / "canonical"; dst.mkdir(exist_ok=True)
-    n = 0
-    for p in src.glob("*.csv"):
-        if p.parent.name == "canonical":
-            continue
-        t = dst / p.name
-        if not t.exists():
-            shutil.copy2(p, t); n += 1
-    return n

@@ -26,13 +26,12 @@
 
 Стадии (`--stage`):
   check       что есть, чего не хватает и какой командой каждое получается (ничего не считает)
-  features    признаки тестового среза + якорей модели молчания, тензоры seq2/seq3
+  features    признаки тестового среза + якорей модели молчания, тензоры seq3
   predict     прогнозы базовых моделей из сохранённых весов -> кэш .npy
   ensemble    усреднение сидов + калибровка + бленд                        (шаги 2-3)
   moments     приведение к моментам + перенос цепочки + шаг силы           (шаги 4-5)
   silence     поправка на молчащих                                         (шаг 6)
   all         всё подряд (по умолчанию)
-  freeze      пересобрать models/chain_test.npz из измеренных сабмитов (служебная)
 
 Переменные окружения:
   OZON_ROOT   корень с train.parquet / sample_submit.csv (по умолчанию — родитель этого каталога)
@@ -142,8 +141,7 @@ MEMBER_PARTS: dict[str, tuple[list[str], str | None]] = {
 #   "preds"   — трейнер НЕ сохраняет веса (в нём нет вызовов model_io). Артефактом
 #               является сам прогноз work/preds/NAME_test.parquet; воспроизвести можно
 #               только повторным запуском трейнера.
-#   "stateless" — обучаемых весов нет по построению (генеративный симулятор):
-#               воспроизводится повторным запуском с тем же сидом.
+# Других значений в действующем составе нет: все 18 членов — либо "weights", либо "preds".
 # secs — фактическое время из work/queue/done/*.json (Apple M1 Pro, 10 ядер, 16 GB).
 BASES: dict[str, dict] = {
     "fusion_v3c42": dict(
@@ -170,10 +168,10 @@ BASES: dict[str, dict] = {
     "kostya46": dict(
         persist="preds", secs=5400, approx_secs=True,
         env={},
-        cmd="пайплайн Кости: work_kostya/scripts (cube.py 379/409 -> train_model.py + "
-            "train_model2.py -> train_test_model.py + train_test_m1.py; пути /root/* поправить "
-            "на корень репозитория). АРТЕФАКТЫ В GIT: work_kostya/preds/kostya46_{val,test}.parquet "
-            "-> скопировать в work/preds"),
+        cmd="пайплайн трека N3: python work_kostya/reproduce.py (train.parquet -> "
+            "work_kostya/preds_repro/kostya46_{val,test}.parquet), сверка "
+            "work_kostya/check_reproduce.py. АРТЕФАКТЫ В GIT: "
+            "work_kostya/preds/kostya46_{val,test}.parquet -> скопировать в work/preds"),
     "gseq_small_s42": dict(
         persist="preds", secs=10800, approx_secs=True,
         env={},
@@ -274,7 +272,9 @@ Q_REF = 0.0027148975861072634        # work/reports/silence_final.json, "q_old"
 A_OLD = 0.894
 A_NEW = 0.65
 
-# Замороженные векторы измеренной цепочки: models/chain_test.npz (см. --stage freeze).
+# Замороженные векторы измеренной цепочки: models/chain_test.npz. Каждый из трёх —
+# РАЗНОСТЬ ОТПРАВЛЕННЫХ ФАЙЛОВ, а не выход модели, поэтому пересчитать их из весов
+# нельзя: они входят в пакет как данные.
 CHAIN_NPZ = "chain_test.npz"
 
 # Контрольные значения итогового файла (250000 строк).
@@ -282,19 +282,22 @@ CHAIN_NPZ = "chain_test.npz"
 # (до пяти проб 20.08). Ночь 21.08 установила, что разброс 1.6470 был СБИТ
 # поправкой на молчащих (полгода незамеченно), оптимум разброса 1.631108 (проба
 # mdl_amber, +0.000125).
-# + дельты mdl_flint/mdl_gneis2/R6 (скрипты work/scripts/{probes5_make,make_r6,make_u_candidates}.py,
-# все константы зафиксированы и закоммичены). ПРИ ЗАМОРОЗКЕ ФИНАЛА шаги 4-6
-# пересвести на неё; у финального файла EXPECT_SD = 1.6311.
+# + дельты mdl_flint/mdl_gneis2/R6. Все они уже вошли в замороженную цепочку
+# models/chain_test.npz; инструменты, которыми они подбирались, в пакет не входят —
+# подбирать заново нечего. У финального файла EXPECT_SD = 1.6311.
 EXPECT_MEAN = 2.3247
 EXPECT_SD = 1.6470
 
 # ---------------------------------------------------------------------------- #
+# Тир v7 (три колонки HMM-симулятора) из конвейера убран: его читал только член
+# twl_v7, а он не вошёл в состав при пересборке 21.08. Сборка v7 стоила отдельного
+# прогона симулятора и ни одним из 18 действующих прогнозов не используется —
+# ни один их meta не выставляет USE_V7.
 FEATURE_TIERS = {
     "base": "anchor={a}.parquet",
     "v2":   "anchor={a}.extra.parquet",
     "v3":   "anchor={a}.v3.parquet",
     "v4":   "anchor={a}.v4.parquet",
-    "v7":   "anchor={a}.v7.parquet",
 }
 # Якоря, на которых обучается модель молчания (см. silence_model.EVAL_TRAIN):
 # пять обучающих + один для калибровки наклона Платта. Все «чистые»: их 30-дневное
@@ -371,10 +374,6 @@ def base_state(base: str) -> tuple[str, str]:
     """(состояние, пояснение) для одной базовой модели."""
     spec = BASES[base]
     cached = (WORK_PREDS / f"{base}_test.parquet").exists()
-    if spec["persist"] == "stateless":
-        return ("готово" if have(f"{base}_meta.json") or cached else "пересчёт",
-                "весов нет по построению, пересчитывается за "
-                f"{spec['secs'] // 60} мин" if not cached else "прогноз в work/preds")
     if spec["persist"] == "preds":
         return ("готово" if cached else "НЕТ",
                 "прогноз-артефакт; " + _persist_reason(base))
@@ -403,13 +402,11 @@ def missing_features() -> list[tuple[str, str, str]]:
     out = []
     anchors = [TEST_ANCHOR_ISO, VAL_ANCHOR_ISO] + SILENCE_ANCHORS
     for tier, pat in FEATURE_TIERS.items():
-        need = [TEST_ANCHOR_ISO] if tier == "v7" else anchors
-        miss = [a for a in need if not (FEATURES / pat.format(a=a)).exists()]
+        miss = [a for a in anchors if not (FEATURES / pat.format(a=a)).exists()]
         if not miss:
             continue
         script = {"base": "build_features.py", "v2": "build_features_v2.py",
-                  "v3": "build_features_v3.py", "v4": "build_features_v4.py",
-                  "v7": "build_features_v7.py"}[tier]
+                  "v3": "build_features_v3.py", "v4": "build_features_v4.py"}[tier]
         arg = "" if tier == "v3" else f" --anchors {','.join(miss)}"
         out.append((f"признаки {tier} ({len(miss)} якорей)",
                     str(FEATURES / pat.format(a=miss[0])),
@@ -432,9 +429,6 @@ def stage_features() -> None:
     run_script("build_features_v2.py", "--anchors", anchors)
     run_script("build_features_v3.py")          # сам пропускает уже собранные срезы
     run_script("build_features_v4.py", "--anchors", anchors)
-    run_script("build_features_v7.py", "--anchors", TEST_ANCHOR_ISO,
-               "--states", "4", "--sims", "300", "--win", "120",
-               "--em-cap", "15000", "--seed", "42")
     run_script("build_seq3.py", "--max-train", "8", env={"POLARS_MAX_THREADS": "3"})
     # seq2 не собирается: в составе 21.08 нет членов на этих тензорах
     log("признаки и тензоры готовы")
@@ -465,62 +459,6 @@ def load_test_matrix(base: str, meta: dict):
     return np.ascontiguousarray(X), uid
 
 
-def _torch_device() -> str:
-    import torch
-    return "mps" if torch.backends.mps.is_available() else "cpu"
-
-
-def _apply_stats(mod, X: np.ndarray, stats_file: Path) -> None:
-    """Препроцессинг ровно тот, каким модель обучена.
-
-    Раньше отсюда передавались только med/lo/hi/mean/std, а ключ `mode` (и таблицы
-    режима rank) отбрасывался. featprep.mode_of при отсутствии `mode` возвращает
-    "clip99", поэтому модель, обученная с --feat-prep signlog|rank, на инференсе
-    молча получила бы ДРУГОЙ препроцессинг. В действующем бленде все члены на clip99,
-    так что это не срабатывало, но флаг живой и цена ошибки — тихо неверный прогноз.
-    Передаём весь npz как есть; лишние ключи apply_stats игнорирует.
-    """
-    z = np.load(stats_file, allow_pickle=True)
-    s = {k: z[k] for k in z.files}
-    missing = [k for k in ("med", "lo", "hi", "mean", "std") if k not in s]
-    if missing:
-        raise MissingArtifact(f"{stats_file.name}: нет ключей {missing}")
-    mod.apply_stats(X, s)
-
-
-def predict_mlp_family(base: str, meta: dict, X: np.ndarray) -> np.ndarray:
-    """mlpziln / mlp2: усреднение сидов в СЫРОЙ шкале (как в трейнере)."""
-    import torch
-    mod = __import__("train_mlpziln" if meta["kind"] == "mlpziln" else "train_mlp2")
-    _apply_stats(mod, X, find(meta["stats_npz"], f"статистики препроцессинга {base}", base))
-    dev, cfg = _torch_device(), meta["cfg"]
-    preds = []
-    for seed in meta["seeds"]:
-        w = find(f"{base}_seed{seed}.pt", f"веса {base}, сид {seed}", base)
-        net = mod.build_model(X.shape[1], cfg["hidden"], cfg["dropout"]).to(dev)
-        net.load_state_dict(torch.load(w, map_location=dev))
-        preds.append(np.expm1(np.clip(mod.predict_log(net, X, dev), 0, None)))
-        del net
-    return np.mean(preds, axis=0)
-
-
-def predict_seq2(base: str, meta: dict) -> tuple[np.ndarray, np.ndarray]:
-    import torch
-    import train_seq2 as mod
-    from common import TEST_ANCHOR, user_universe
-    uids = user_universe()["user_id"].to_numpy()
-    x_mm = mod.open_x(TEST_ANCHOR)
-    dev, preds = _torch_device(), []
-    for seed in meta["seeds"]:
-        w = find(f"{base}_seed{seed}.pt", f"веса {base}, сид {seed}", base)
-        net = mod.build_model(meta["arch"], dev)
-        net.load_state_dict(torch.load(w, map_location=dev))
-        _, lp = mod.predict_main(net, x_mm, dev, 4096, 1)
-        preds.append(np.expm1(np.clip(lp, 0, None)).astype(np.float64))
-        del net
-    return np.mean(preds, axis=0), uids
-
-
 def _lgb(fname: str, what: str, base: str):
     import lightgbm as lgb
     return lgb.Booster(model_file=str(find(fname, what, base)))
@@ -545,28 +483,6 @@ def predict_gbdt(base: str, meta: dict, X: np.ndarray) -> np.ndarray:
     return np.clip(raw, 0, None)
 
 
-def predict_countaov(base: str, meta: dict, X: np.ndarray) -> np.ndarray:
-    from train_countaov import COMBINE
-    pc = _lgb(f"{base}__count.txt", f"{base}: голова числа заказов", base).predict(X)
-    pa = _lgb(f"{base}__aov.txt", f"{base}: голова среднего чека", base).predict(X)
-    return COMBINE[meta["mode"]](pc, pa, meta["aov_damp"])
-
-
-def predict_hmmsim(base: str) -> tuple[np.ndarray, np.ndarray]:
-    """Весов нет по построению: пересчитываем симулятор с теми же гиперпараметрами."""
-    import polars as pl
-    from common import PREDS_DIR
-    out = PREDS_DIR / f"{base}_test.parquet"
-    if not out.exists():
-        log(f"{base}: сохранённых весов нет по построению (генеративный симулятор) — "
-            f"пересчитываю, ~{BASES[base]['secs'] // 60} мин")
-        run_script("train_hmm_sim.py", "--name", base, "--states", "4", "--sims", "500",
-                   "--win", "120", "--em-cap", "25000", "--splits", "test",
-                   env={"THREADS": os.environ.get("OMP_NUM_THREADS", "6")})
-    d = pl.read_parquet(out).sort("user_id")
-    return d["pred"].to_numpy(), d["user_id"].to_numpy()
-
-
 def cached_pred(base: str, why: str) -> tuple[np.ndarray, np.ndarray]:
     """Прогноз-артефакт из work/preds (для трейнеров без сохранения весов)."""
     import polars as pl
@@ -581,9 +497,14 @@ def cached_pred(base: str, why: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def predict_base(base: str) -> tuple[np.ndarray, np.ndarray]:
+    """Все 18 базовых прогнозов состава — либо сохранённые бустеры, либо кэш.
+
+    Ветки для torch-семейств (mlpziln/mlp2, seq2), разложения countaov и
+    генеративного симулятора убраны вместе с их трейнерами: при пересборке
+    состава 21.08 ни один такой член в бленд не вошёл, а репозиторий содержит
+    только то, чем собираются F14_int08 и F21_seg4g08.
+    """
     spec = BASES[base]
-    if spec["persist"] == "stateless":
-        return predict_hmmsim(base)
     if spec["persist"] == "preds":
         return cached_pred(base, "трейнер не сохраняет веса")
     if not have(f"{base}_meta.json"):
@@ -591,13 +512,7 @@ def predict_base(base: str) -> tuple[np.ndarray, np.ndarray]:
         return cached_pred(base, "нет сохранённых весов")
     meta = load_meta(base)
     kind = meta["kind"]
-    if kind == "seq2":
-        return predict_seq2(base, meta)
     X, uid = load_test_matrix(base, meta)
-    if kind in ("mlpziln", "mlp2"):
-        return predict_mlp_family(base, meta, X), uid
-    if kind == "countaov":
-        return predict_countaov(base, meta, X), uid
     if kind == "gbdt":
         return predict_gbdt(base, meta, X), uid
     raise MissingArtifact(f"неизвестный тип модели {kind!r} в {base}_meta.json")
@@ -682,8 +597,8 @@ def load_chain() -> dict:
         raise MissingArtifact(
             f"НЕ ХВАТАЕТ ФАЙЛА: {CHAIN_NPZ} (оценённая цепочка поправок)\n"
             f"  искали в: {MODELS_DIR}\n            {WORK_MODELS}\n"
-            f"  создаётся: .venv/bin/python final_submission/inference.py --stage freeze\n"
-            f"work/preds/blend_cal_test.parquet)")
+            f"  это данные, а не выход модели: три вектора-разности отправленных файлов;\n"
+            f"  пересчитать из весов нельзя, файл должен приехать вместе с пакетом.")
     z = np.load(p)
     return {k: z[k] for k in z.files}
 
@@ -857,42 +772,6 @@ def stage_submission(lp: np.ndarray | None = None) -> None:
 
 # ============================ СТАДИЯ: FREEZE ================================= #
 
-def stage_freeze() -> None:
-    """Заморозить измеренную цепочку в models/chain_test.npz.
-
-    Три вектора по 250000, каждый — РАЗНОСТЬ ОТПРАВЛЕННЫХ ФАЙЛОВ, а не выход модели,
-    поэтому их нельзя пересчитать из весов и они входят в пакет как данные:
-
-               его моменты и есть REF_MEAN/REF_SD.
-      carry_lp накопленная цепочка LB-поправок: ref_lp минус приведённый к тем же
-               моментам старый бленд (work/preds/blend_cal_test.parquet). Ровно то,
-               что make_candidate.py делает флагом --carry-from blend_cal.
-      dir_old  старое (табличное) направление поправки на молчащих, приведённое к
-               сабмиты, отличающиеся ровно этим направлением с силой 0.5.
-    """
-    import polars as pl
-    sys.path.insert(0, str(SCRIPTS))
-    from subs import lp as sub_lp
-
-    p = WORK_PREDS / "blend_cal_test.parquet"
-    if not p.exists():
-        raise MissingArtifact(f"нет {p} — без него не восстановить перенос цепочки")
-    d = pl.read_parquet(p).sort("user_id")
-    assert np.array_equal(d["user_id"].to_numpy(), uid), "user_id старого бленда не совпал"
-    xo = np.log1p(np.clip(d["pred"].to_numpy().astype(np.float64), 0, None))
-    bo = REF_SD / xo.std()
-    carry = ref - ((REF_MEAN - bo * xo.mean()) + bo * xo)
-
-    q = float((mdl_tektit ** 2).mean())
-    mdl_tektit = mdl_tektit * float(np.sqrt(Q_REF / q))
-
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    out = MODELS_DIR / CHAIN_NPZ
-    np.savez(out, user_id=uid.astype(np.int64), ref_lp=ref, carry_lp=carry, dir_old=mdl_tektit)
-    log(f"записан {out}: ref среднее {ref.mean():.6f} разброс {ref.std():.6f}; "
-        f"цепочка разброс {carry.std():.5f}; старое направление q={q:.6f} -> {Q_REF:.6f}")
-
-
 # ============================== СТАДИЯ: CHECK ================================ #
 
 def stage_check(verify_blend: bool = False) -> tuple[int, int]:
@@ -925,7 +804,7 @@ def stage_check(verify_blend: bool = False) -> tuple[int, int]:
           f"{len(SILENCE_ANCHORS)} якорей модели молчания")
     fm = missing_features()
     bad = {w.split(" (")[0] for w, _, _ in fm}
-    for tier in list(FEATURE_TIERS) + ["тензоры seq3", "тензоры seq2"]:
+    for tier in list(FEATURE_TIERS) + ["тензоры seq3"]:
         label = tier if tier.startswith("тензоры") else f"признаки {tier}"
         if label not in bad:
             print(f"  есть {label}")
@@ -975,7 +854,7 @@ def stage_check(verify_blend: bool = False) -> tuple[int, int]:
     print("\n=== 5. оценённая цепочка поправок (шаги 4-6) ===")
     ok = have(CHAIN_NPZ)
     print(f"  {CHAIN_NPZ:<28} {'есть' if ok else 'НЕТ '}"
-          + ("" if ok else "   .venv/bin/python final_submission/inference.py --stage freeze"))
+          + ("" if ok else "   данные пакета, из весов не пересчитываются"))
     if not ok:
         miss.append(CHAIN_NPZ)
         blocking.append(CHAIN_NPZ)
@@ -1046,7 +925,7 @@ def stage_check(verify_blend: bool = False) -> tuple[int, int]:
 # ================================== MAIN ===================================== #
 
 STAGES = ["check", "features", "predict", "ensemble", "moments", "silence",
-          "submission", "freeze"]
+          "submission"]
 
 
 def main() -> int:
@@ -1065,9 +944,6 @@ def main() -> int:
         n_miss, n_block = stage_check(args.verify_blend)
         return 2 if n_block else (1 if n_miss else 0)
     try:
-        if args.stage == "freeze":
-            stage_freeze()
-            return 0
         if args.stage in ("features", "all"):
             stage_features()
         if args.stage in ("predict", "all"):

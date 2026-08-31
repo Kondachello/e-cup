@@ -1,74 +1,22 @@
-# данные соревнования и производные (тяжёлые, восстанавливаются скриптами)
+# Данные соревнования и производные от них: тяжёлые, восстанавливаются скриптами.
 train.parquet
 sample_submit.csv
 work/features/
-work/seq/
-work/seq2/
-work/features_sub/
-work/preds/
+work/features_short/
+work/seq3/
 work/models/
+work/preds/
 work/queue/
-work/lb_cache.npz
-submissions/
-prev_solutions/
-solution_lbmix2/artifacts/
-solution_lbmix2.zip
-research/
+work/reports/
+work_kostya/_build/
+work_kostya/preds_repro/
 
-# окружение и служебное
+# Выход инференса. Два отправленных файла добавлены в индекс явно (git add -f):
+# submissions/F14_int08.csv и submissions/F21_seg4g08.csv.
+submissions/
+
+# Окружение и служебное
 .venv/
 __pycache__/
 *.pyc
 .DS_Store
-work/reports/*.log
-work/reports/queue_runner.out
-baseline-seacrh-ltv.ipynb
-
-
-# перенос между машинами и логи прогонов (трек №5)
-from_gpu/
-_to_kosta/
-runlogs/
-COMMIT_MSG.txt
-# kaggle-трек: локальные артефакты сборки и смоука (0.7 ГБ, восстанавливаются за 45с)
-work/kaggle/run/
-work/colab/out/hist_*
-
-# Артефакты обучения и кэши: пересобираются скриптами, в общий репозиторий не идут.
-# 20.08 они случайно уехали в коммит слияния (git add -A без ограничения пути) —
-# 3.9 ГБ, из-за чего пуш не укладывался в лимит времени.
-work/seq3/
-work/seq2/
-work/data/*.npy
-work/data/*.npz
-# локальные артефакты сид-прогонов kostya46 (кубы ~4.6 ГБ и матрицы; пересобираются 986–987)
-work_kostya/work/
-work/yoy_dirs.npz
-work/reports/mb_fix_*.npz
-work/reports/mb_fix_*.npy
-
-# кэш признаков Жени (пересобирается g1_build.py)
-work/zhenya_eda/cache/
-
-# tfm4: кэш таблицы и статистики нормировки (тяжёлые, пересобираются prep)
-tab_raw.*
-tabstats_*.json
-result_*.json
-
-# перенос на GPU-машину
-_to_gpu/
-
-# снимки веток и переносы
-_br_*.zip
-_br_*.tgz
-_new_preds.zip
-_snap/
-from_sasha/
-
-# кэш признаков erafix (1.5 ГБ, пересобирается v1b_run_local за ~20 мин)
-work/zhenya_eda/out/erafix_feat.npz
-
-# тяжёлые переносные артефакты кампании 29.08 (в git не идут, лежат локально/на Kaggle)
-ozon_kevf_ckpt.zip
-sasha2_jf_package.zip
-work/data/kaggle_session3/
