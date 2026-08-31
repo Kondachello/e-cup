@@ -72,6 +72,10 @@ WORK_PREDS = ROOT / "work" / "preds"
 FEATURES = ROOT / "work" / "features"
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", str(HERE / "models"))).resolve()
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", str(MODELS_DIR / "preds_test")))
+# Отгружаемые прогноз-артефакты двенадцати членов с persist="preds". Кладёт их сюда
+# pack_models.py; именно они, а не work/preds, приезжают вместе с репозиторием.
+# Якорь на MODELS_DIR намеренный: CACHE_DIR можно увести под .npy на другой диск.
+PACK_PREDS = MODELS_DIR / "preds_test"
 
 sys.path.insert(0, str(SCRIPTS))
 
@@ -373,7 +377,7 @@ def load_meta(base: str) -> dict:
 def base_state(base: str) -> tuple[str, str]:
     """(состояние, пояснение) для одной базовой модели."""
     spec = BASES[base]
-    cached = (WORK_PREDS / f"{base}_test.parquet").exists()
+    cached = pred_artifact(base) is not None
     if spec["persist"] == "preds":
         return ("готово" if cached else "НЕТ",
                 "прогноз-артефакт; " + _persist_reason(base))
@@ -483,13 +487,30 @@ def predict_gbdt(base: str, meta: dict, X: np.ndarray) -> np.ndarray:
     return np.clip(raw, 0, None)
 
 
+def pred_artifact(base: str) -> Path | None:
+    """Прогноз-артефакт: work/preds (свежеобученный) либо models/preds_test (пакет).
+
+    Порядок именно такой: если член только что переобучен, берётся его новый прогноз,
+    а не отгруженная копия. Раньше искали ТОЛЬКО в work/preds — каталоге под
+    .gitignore, — и двенадцать прогнозов, которые pack_models.py кладёт в
+    models/preds_test и которые приезжают с репозиторием, не читались вовсе:
+    из чистого клона инференс требовал переобучения всего состава.
+    """
+    for d in (WORK_PREDS, PACK_PREDS):
+        p = d / f"{base}_test.parquet"
+        if p.exists():
+            return p
+    return None
+
+
 def cached_pred(base: str, why: str) -> tuple[np.ndarray, np.ndarray]:
-    """Прогноз-артефакт из work/preds (для трейнеров без сохранения весов)."""
+    """Прогноз-артефакт (для трейнеров, не сохраняющих веса)."""
     import polars as pl
-    p = WORK_PREDS / f"{base}_test.parquet"
-    if not p.exists():
+    p = pred_artifact(base)
+    if p is None:
         raise MissingArtifact(
-            f"НЕ ХВАТАЕТ ПРОГНОЗА: {p}  ({why})\n"
+            f"НЕ ХВАТАЕТ ПРОГНОЗА: {base}_test.parquet  ({why})\n"
+            f"  искали в: {WORK_PREDS}\n            {PACK_PREDS}\n"
             f"  создаётся: {howto(base)}\n"
             f"  ~{BASES[base]['secs'] // 60} мин; {_persist_reason(base)}.")
     d = pl.read_parquet(p).sort("user_id")
@@ -813,9 +834,10 @@ def stage_check(verify_blend: bool = False) -> tuple[int, int]:
         miss.append(what)
 
     print(f"\n=== 3. базовые модели бленда ({len(needed_bases())} шт) ===")
-    print("  состояние «готово» у строк «прогноз-артефакт» означает файл в work/preds:\n"
-          "  их трейнеры не сохраняют веса (нет вызовов work/scripts/model_io.py), и\n"
-          "  в отгружаемом пакете, где work/preds пуст, они требуют повторного обучения.")
+    print("  «прогноз-артефакт» — член, трейнер которого не сохраняет веса; проверяемый\n"
+          "  артефакт у него один: NAME_test.parquet. Инференс берёт его из work/preds\n"
+          "  (если член только что переобучен), иначе из models/preds_test — отгружаемой\n"
+          "  копии, которая приезжает вместе с репозиторием. «готово» = найден хоть где-то.")
     print(f"  {'модель':<18}{'вклад':>7}  {'состояние':<9} {'мин':>5}  пояснение")
     print("  " + "-" * 88)
     contrib = {}
@@ -906,16 +928,15 @@ def stage_check(verify_blend: bool = False) -> tuple[int, int]:
                 groups.add(g)
                 clean_secs += spec["secs"]
     if need_secs:
-        print(f"переобучение здесь и сейчас (work/preds на месте): "
+        print(f"ПЕРЕОБУЧИТЬ ОБЯЗАТЕЛЬНО (артефакта нет ни в work/preds, ни в пакете): "
               f"{need_secs / 3600:.1f} ч")
-    print(f"переобучение на ЧИСТОЙ машине (только веса из models/, work/preds пуст): "
-          f"{clean_secs / 3600:.1f} ч")
-    print("последовательно, без параллели: на 16 ГБ параллельные тяжёлые прогоны "
-          "дважды роняли машину.")
-    print("плюс сборка признаков/тензоров из раздела 2, калибровки из раздела 4 "
-          "(~1 мин каждая) и обучение модели молчания (~10 мин)")
-    print("ВАЖНО про упаковку: веса лежат в work/models. Перед отгрузкой их надо "
-          "скопировать\nв final_submission/models — см. README.md, раздел «Упаковка».")
+    print(f"необязательно: переобучить двенадцать прогноз-артефактов вместо того, чтобы "
+          f"взять\nотгруженные копии, — {clean_secs / 3600:.1f} ч последовательно "
+          f"(на 16 ГБ параллельные тяжёлые\nпрогоны дважды роняли машину). Прогноз "
+          f"побитово не повторится: у части членов\nобучение недетерминировано, у "
+          f"fusion_f удалены его тензоры. Расхождение измерено —\nREADME.md, раздел 7.")
+    print("сборка признаков и тензоров раздела 2 нужна в любом случае: без них не "
+          "посчитать\nни один член на сохранённых весах и не обучить модель молчания.")
     if miss:
         print("\nПорядок восстановления: раздел 2 -> раздел 3 -> раздел 4 -> раздел 5.\n"
               "Полная последовательность с флагами — final_submission/reproduce_training.md.")
@@ -943,6 +964,9 @@ def main() -> int:
         # прогон собрать не может (веса, калибровки, цепочка, входные файлы).
         n_miss, n_block = stage_check(args.verify_blend)
         return 2 if n_block else (1 if n_miss else 0)
+    # Каталог промежуточных .npy: стадии ensemble/moments/silence пишут в него, и при
+    # запуске по одной стадии его может ещё не быть.
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     try:
         if args.stage in ("features", "all"):
             stage_features()
